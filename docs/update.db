@@ -1,0 +1,6 @@
+INSERT INTO `aa_users` (`u_id`, `u_username`, `u_password`, `u_name`, `u_join_date`, `u_leave_date`, `u_salary`, `u_mobile`, `u_email`, `u_address`, `u_qualification`, `u_department`, `u_status`, `u_type`, `u_leader`, `u_comments`) VALUES (NULL, 'masteradmin', MD5('swamibapa'), 'Hiren Patel', '', '', '0', '9998994817', 'prince.swami@gmail.com', '', '', '', 'Active', 'Master Admin', '', '');
+
+select count(*), ZoneEName FROM Male_SdixaRes R, Male_Zone Z WHERE R.ZoneID = Z.ZoneID AND R.KType <> 'Yuvak/Yuvati' GROUP BY ZoneEName ORDER BY `Z`.`ZoneEName` ASC 
+SELECT COUNT(*), Z.ZoneEName FROM Female_SdixaRes R, Female_Zone Z WHERE Z.ZoneID = R.ZoneID AND KType <> 'Yuvak/Yuvati' AND ( Z.ZoneEName LIKE '%amda%' OR  Z.ZoneEName LIKE '%surat%' OR Z.ZoneEName LIKE '%vado%' OR Z.ZoneEName LIKE '%rajkot%'  OR Z.ZoneEName LIKE '%bhav%'  OR Z.ZoneEName LIKE '%mum%'  OR Z.ZoneEName LIKE '%GAndhi%' ) GROUP BY Z.ZoneEName
+
+ALTER TABLE `aa_tasks` CHANGE `t_status` `t_status` ENUM('New','Inprogress','Completed','Hold') CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL DEFAULT 'New'; 

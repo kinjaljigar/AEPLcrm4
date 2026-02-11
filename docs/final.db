@@ -1,0 +1,323 @@
+-- phpMyAdmin SQL Dump
+-- version 5.0.4
+-- https://www.phpmyadmin.net/
+--
+-- Host: localhost
+-- Generation Time: Nov 29, 2020 at 11:59 PM
+-- Server version: 5.6.16-1~exp1
+-- PHP Version: 7.3.24-3+ubuntu16.04.1+deb.sury.org+1
+
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
+
+--
+-- Database: `csoft_aashir`
+--
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_holidays`
+--
+
+CREATE TABLE `aa_holidays` (
+  `h_id` int(11) NOT NULL,
+  `h_date` date NOT NULL,
+  `h_title` varchar(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_leaves`
+--
+
+CREATE TABLE `aa_leaves` (
+  `l_id` bigint(20) NOT NULL,
+  `l_u_id` int(11) NOT NULL,
+  `l_create_date` datetime NOT NULL,
+  `l_from_date` date NOT NULL,
+  `l_to_date` date NOT NULL,
+  `l_status` enum('New','Approved','Declined') NOT NULL,
+  `l_message` varchar(255) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_projects`
+--
+
+CREATE TABLE `aa_projects` (
+  `p_id` int(11) NOT NULL,
+  `p_number` varchar(100) NOT NULL,
+  `p_name` varchar(100) NOT NULL,
+  `p_value` bigint(20) NOT NULL,
+  `p_contact` varchar(50) NOT NULL,
+  `p_status` enum('New','Active','Hold','Completed') NOT NULL,
+  `p_address` varchar(255) NOT NULL,
+  `p_scope` text NOT NULL,
+  `p_created` datetime NOT NULL,
+  `p_updated` datetime NOT NULL,
+  `p_show_dashboard` enum('Yes','No') NOT NULL DEFAULT 'No'
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_project_contacts`
+--
+
+CREATE TABLE `aa_project_contacts` (
+  `pc_id` bigint(20) NOT NULL,
+  `pc_p_id` int(11) NOT NULL,
+  `pc_name` varchar(50) NOT NULL,
+  `pc_mobile` varchar(15) DEFAULT NULL,
+  `pc_email` varchar(50) DEFAULT NULL,
+  `pc_designation` varchar(50) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_project_expense`
+--
+
+CREATE TABLE `aa_project_expense` (
+  `pe_p_id` int(11) NOT NULL,
+  `pe_lbl` varchar(80) NOT NULL,
+  `pe_val` bigint(20) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_project_vcom`
+--
+
+CREATE TABLE `aa_project_vcom` (
+  `pv_id` bigint(20) NOT NULL,
+  `pv_datetime` datetime NOT NULL,
+  `pv_u_id` int(11) NOT NULL,
+  `pv_text` text NOT NULL,
+  `pv_p_id` int(11) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_task2user`
+--
+
+CREATE TABLE `aa_task2user` (
+  `tu_id` bigint(20) NOT NULL,
+  `tu_u_id` int(11) NOT NULL,
+  `tu_t_id` bigint(20) NOT NULL,
+  `tu_p_id` int(11) NOT NULL,
+  `tu_removed` enum('Yes','No') DEFAULT 'No',
+  `tu_datetime` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_tasks`
+--
+
+CREATE TABLE `aa_tasks` (
+  `t_id` bigint(20) NOT NULL,
+  `t_p_id` int(11) NOT NULL,
+  `t_u_id` int(11) NOT NULL,
+  `t_title` varchar(255) NOT NULL,
+  `t_priority` enum('Low','Medium','High','Highest') NOT NULL,
+  `t_hours` int(11) NOT NULL,
+  `t_description` text NOT NULL,
+  `t_dependancy` text NOT NULL,
+  `t_status` enum('New','Inprogress','Completed') NOT NULL DEFAULT 'New',
+  `t_parent` bigint(20) NOT NULL,
+  `t_createdate` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_task_files`
+--
+
+CREATE TABLE `aa_task_files` (
+  `tf_id` bigint(20) NOT NULL,
+  `tf_t_id` bigint(20) NOT NULL,
+  `tf_title` varchar(255) NOT NULL,
+  `tf_file_name` varchar(255) NOT NULL,
+  `tf_type` varchar(10) NOT NULL,
+  `tf_created` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_users`
+--
+
+CREATE TABLE `aa_users` (
+  `u_id` bigint(20) NOT NULL,
+  `u_username` varchar(30) NOT NULL,
+  `u_password` varchar(50) NOT NULL,
+  `u_name` varchar(90) NOT NULL,
+  `u_join_date` date NOT NULL,
+  `u_leave_date` date NOT NULL,
+  `u_salary` mediumint(9) NOT NULL,
+  `u_mobile` varchar(10) NOT NULL,
+  `u_email` varchar(60) NOT NULL,
+  `u_address` text NOT NULL,
+  `u_qualification` varchar(50) NOT NULL,
+  `u_department` enum('Architecture','MEPF','Admin') NOT NULL,
+  `u_status` enum('Active','Deactive') NOT NULL,
+  `u_type` enum('Bim Head','Project Leader','Employee','Master Admin') NOT NULL,
+  `u_leader` int(11) NOT NULL,
+  `u_comments` text
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+--
+-- Dumping data for table `aa_users`
+--
+
+INSERT INTO `aa_users` (`u_id`, `u_username`, `u_password`, `u_name`, `u_join_date`, `u_leave_date`, `u_salary`, `u_mobile`, `u_email`, `u_address`, `u_qualification`, `u_department`, `u_status`, `u_type`, `u_leader`, `u_comments`) VALUES
+(1, 'masteradmin', '8e41855bc84d3ab1b79ce45b88ff02f9', 'Hiren Patel', '0000-00-00', '0000-00-00', 0, '9998994817', 'prince.swami@gmail.com', '', '', '', 'Active', 'Master Admin', 0, ''),
+(3, 'projectadmin', '8e41855bc84d3ab1b79ce45b88ff02f9', 'Project Admin', '2020-09-30', '2020-10-01', 100, '9998994817', 'projectadmin@gmail.com', 'No address', 'Btech', 'Architecture', 'Active', 'Bim Head', 0, NULL),
+(4, 'teamlead1', '8e41855bc84d3ab1b79ce45b88ff02f9', 'Project Leader', '2020-10-01', '2020-10-02', 120, '9998994816', 'teamlead1@gmail.com', 'No Add ress q', 'B Ele', 'MEPF', 'Active', 'Project Leader', 0, NULL),
+(5, 'jaydev.employee', '8e41855bc84d3ab1b79ce45b88ff02f9', 'Jaydev Employee', '0000-00-00', '0000-00-00', 200, '9998994815', '', 'at home', '', 'Architecture', 'Active', 'Employee', 4, NULL);
+
+--
+-- Indexes for dumped tables
+--
+
+--
+-- Indexes for table `aa_holidays`
+--
+ALTER TABLE `aa_holidays`
+  ADD PRIMARY KEY (`h_id`),
+  ADD KEY `h_date` (`h_date`);
+
+--
+-- Indexes for table `aa_leaves`
+--
+ALTER TABLE `aa_leaves`
+  ADD PRIMARY KEY (`l_id`);
+
+--
+-- Indexes for table `aa_projects`
+--
+ALTER TABLE `aa_projects`
+  ADD PRIMARY KEY (`p_id`);
+
+--
+-- Indexes for table `aa_project_contacts`
+--
+ALTER TABLE `aa_project_contacts`
+  ADD PRIMARY KEY (`pc_id`),
+  ADD KEY `pc_p_id` (`pc_p_id`);
+
+--
+-- Indexes for table `aa_project_expense`
+--
+ALTER TABLE `aa_project_expense`
+  ADD KEY `pe_p_id` (`pe_p_id`);
+
+--
+-- Indexes for table `aa_project_vcom`
+--
+ALTER TABLE `aa_project_vcom`
+  ADD PRIMARY KEY (`pv_id`),
+  ADD KEY `pv_datetime` (`pv_datetime`),
+  ADD KEY `pv_p_id` (`pv_p_id`);
+
+--
+-- Indexes for table `aa_task2user`
+--
+ALTER TABLE `aa_task2user`
+  ADD PRIMARY KEY (`tu_id`),
+  ADD UNIQUE KEY `tu_u_id` (`tu_u_id`,`tu_t_id`);
+
+--
+-- Indexes for table `aa_tasks`
+--
+ALTER TABLE `aa_tasks`
+  ADD PRIMARY KEY (`t_id`),
+  ADD KEY `t_p_id` (`t_p_id`),
+  ADD KEY `t_u_id` (`t_u_id`),
+  ADD KEY `t_parent` (`t_parent`);
+
+--
+-- Indexes for table `aa_task_files`
+--
+ALTER TABLE `aa_task_files`
+  ADD PRIMARY KEY (`tf_id`),
+  ADD KEY `tf_t_id` (`tf_t_id`);
+
+--
+-- Indexes for table `aa_users`
+--
+ALTER TABLE `aa_users`
+  ADD PRIMARY KEY (`u_id`),
+  ADD KEY `u_username` (`u_username`);
+
+--
+-- AUTO_INCREMENT for dumped tables
+--
+
+--
+-- AUTO_INCREMENT for table `aa_holidays`
+--
+ALTER TABLE `aa_holidays`
+  MODIFY `h_id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `aa_leaves`
+--
+ALTER TABLE `aa_leaves`
+  MODIFY `l_id` bigint(20) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `aa_projects`
+--
+ALTER TABLE `aa_projects`
+  MODIFY `p_id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `aa_project_contacts`
+--
+ALTER TABLE `aa_project_contacts`
+  MODIFY `pc_id` bigint(20) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `aa_project_vcom`
+--
+ALTER TABLE `aa_project_vcom`
+  MODIFY `pv_id` bigint(20) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `aa_task2user`
+--
+ALTER TABLE `aa_task2user`
+  MODIFY `tu_id` bigint(20) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `aa_tasks`
+--
+ALTER TABLE `aa_tasks`
+  MODIFY `t_id` bigint(20) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `aa_task_files`
+--
+ALTER TABLE `aa_task_files`
+  MODIFY `tf_id` bigint(20) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `aa_users`
+--
+ALTER TABLE `aa_users`
+  MODIFY `u_id` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
+COMMIT;

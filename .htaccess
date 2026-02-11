@@ -1,0 +1,34 @@
+# CodeIgniter 4 .htaccess Configuration
+# CI3 backup available in: ci3_backup/.htaccess.ci3
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /AEPLcrm4/
+
+    # Disable access to sensitive directories and files
+    RewriteRule ^(app|system|writable|vendor|ci3_backup)(.*) - [F,L]
+    RewriteRule ^(\.env|spark|composer\.json|composer\.lock|\.gitignore)$ - [F,L]
+
+    # Allow access to public assets
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+
+    # Route everything through index.php
+    RewriteRule ^(.*)$ index.php/$1 [L]
+</IfModule>
+
+# Set environment (development or production)
+SetEnv CI_ENVIRONMENT development
+
+# Disable directory browsing
+Options -Indexes
+
+# Protect sensitive files
+<FilesMatch "^(\.env|spark|composer\.json|composer\.lock|\.gitignore|\.htaccess)$">
+    Require all denied
+</FilesMatch>
+
+# Allow access to public assets (CSS, JS, images, etc.)
+<FilesMatch "\.(css|js|jpg|jpeg|png|gif|svg|woff|woff2|ttf|eot|ico|pdf)$">
+    Require all granted
+</FilesMatch>

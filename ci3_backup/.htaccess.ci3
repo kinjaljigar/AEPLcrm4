@@ -1,0 +1,15 @@
+<ifmodule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /AEPLcrm4/
+
+  RewriteRule ^(db|vendor|composer.json|.production_crontab)(.*) - [L,R=404]
+
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^(.*)$ index.php?/$1 [L]
+  RewriteRule ^$ index.php [L]
+</ifmodule>
+SetEnv CI_ENV production
+<filesmatch "^(\.env|spark|composer\.json|composer\.lock|\.gitignore|\.htaccess)$">
+  Deny from all
+</filesmatch>

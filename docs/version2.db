@@ -1,0 +1,87 @@
+UPDATE `aa_projects` SET `p_status` = 'Active' WHERE `p_status` ='New';
+ALTER TABLE `aa_tasks` CHANGE `t_priority` `t_priority` TINYINT NULL DEFAULT NULL; 
+ALTER TABLE `aa_projects` ADD `p_cat` ENUM('BIM','Consultancy','Others') NULL AFTER `p_show_dashboard`; 
+ALTER TABLE `aa_tasks` CHANGE `t_hours` `t_hours` DOUBLE NOT NULL; 
+ALTER TABLE `aa_tasks` CHANGE `t_hours` `t_hours` DOUBLE(5,2) NOT NULL; 
+
+
+
+CREATE TABLE `aa_message` (
+  `me_id` int(11) NOT NULL,
+  `me_p_id` bigint(20) NOT NULL,
+  `me_text` text NOT NULL,
+  `me_datetime` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_message_users`
+--
+
+CREATE TABLE `aa_message_users` (
+  `mu_id` bigint(20) NOT NULL,
+  `mu_p_id` bigint(20) NOT NULL,
+  `mu_me_id` bigint(20) NOT NULL,
+  `mu_u_id` bigint(20) NOT NULL,
+  `mu_read` tinyint(1) NOT NULL DEFAULT '0'
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `aa_present`
+--
+
+CREATE TABLE `aa_present` (
+  `pr_id` bigint(20) NOT NULL,
+  `pr_u_id` bigint(20) NOT NULL,
+  `pr_date` date NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+--
+-- Indexes for dumped tables
+--
+
+--
+-- Indexes for table `aa_message`
+--
+ALTER TABLE `aa_message`
+  ADD PRIMARY KEY (`me_id`),
+  ADD KEY `me_p_id` (`me_p_id`);
+
+--
+-- Indexes for table `aa_message_users`
+--
+ALTER TABLE `aa_message_users`
+  ADD PRIMARY KEY (`mu_id`);
+
+--
+-- Indexes for table `aa_present`
+--
+ALTER TABLE `aa_present`
+  ADD PRIMARY KEY (`pr_id`),
+  ADD UNIQUE KEY `pr_u_id` (`pr_u_id`,`pr_date`);
+
+--
+-- AUTO_INCREMENT for dumped tables
+--
+
+--
+-- AUTO_INCREMENT for table `aa_message`
+--
+ALTER TABLE `aa_message`
+  MODIFY `me_id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `aa_message_users`
+--
+ALTER TABLE `aa_message_users`
+  MODIFY `mu_id` bigint(20) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `aa_present`
+--
+ALTER TABLE `aa_present`
+  MODIFY `pr_id` bigint(20) NOT NULL AUTO_INCREMENT;
+COMMIT;

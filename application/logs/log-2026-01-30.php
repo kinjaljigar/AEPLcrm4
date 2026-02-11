@@ -1,0 +1,9 @@
+ERROR - 2026-01-30 16:58:05 --> 404 Page Not Found: Assets/admin
+ERROR - 2026-01-30 16:58:42 --> 404 Page Not Found: Assets/admin
+ERROR - 2026-01-30 16:58:55 --> 404 Page Not Found: Assets/admin
+ERROR - 2026-01-30 16:59:18 --> 404 Page Not Found: Assets/admin
+ERROR - 2026-01-30 16:59:23 --> 404 Page Not Found: Assets/admin
+ERROR - 2026-01-30 16:59:30 --> 404 Page Not Found: Assets/admin
+ERROR - 2026-01-30 17:00:19 --> 404 Page Not Found: Assets/admin
+ERROR - 2026-01-30 17:00:37 --> 404 Page Not Found: Assets/admin
+ERROR - 2026-01-30 17:00:40 --> 404 Page Not Found: Assets/admin
