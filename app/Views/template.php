@@ -139,13 +139,14 @@ if (isset($view_data['plugins'])) {
                         <li class="header">MAIN NAVIGATION</li>
                         <?php
                         $menu = array();
-                        if ($view_data['admin_session']['u_type'] == 'Master Admin') {
+                        $u_type = $view_data['admin_session']['u_type'] ?? '';
+                        if ($u_type == 'Master Admin') {
                             $menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');
-                            if ($view_data['admin_session']['u_app_auth'] == '1') {
-                                if ($view_data['admin_session']['u_type'] != 'Associate User') {
+                            if (($view_data['admin_session']['u_app_auth'] ?? '0') == '1') {
+                                if ($u_type != 'Associate User') {
                                     $menu['conferences'] = array('Conferences', 'conference', 'fa-tasks');
                                     $menu['schedules'] = array('Schedules', 'schedule', 'fa-bell');
-                                    if ($view_data['admin_session']['u_type'] == 'Master Admin' || $view_data['admin_session']['u_type'] == 'Bim Head' || $view_data['admin_session']['u_type'] == 'Super Admin') {
+                                    if ($u_type == 'Master Admin' || $u_type == 'Bim Head' || $u_type == 'Super Admin') {
                                         $menu['company'] = array('Companies', 'company', 'fa-tasks');
                                     }
                                 }
@@ -183,7 +184,7 @@ if (isset($view_data['plugins'])) {
 
 
                             $multi_levelReport['employee_attendance_report'] = array('Employee Atttendance Report', 'home/report_attendance_employee', 'fa-hand-o-right');
-                            if ($view_data['admin_session']['u_type'] == 'Master Admin' || $view_data['admin_session']['u_type'] == 'Super Admin')
+                            if ($u_type == 'Master Admin' || $u_type == 'Super Admin')
                                 $multi_levelReport['employee_salary_report'] = array('Employee Salary Report', 'home/report_employee_salary', 'fa-hand-o-right');
                             //$multi_levelReport['report_dependency'] = array('Dependency', 'home/report_dependency', 'fa-hand-o-right');
                             $multi_levelReport['evsa_report'] = array('Estimated v/s Actual', 'home/report_estimated_actual', 'fa-hand-o-right');
@@ -208,21 +209,21 @@ if (isset($view_data['plugins'])) {
                             $menu['Reports'] = array('Reports', '#', 'fa-file', $multi_levelReport);
                         } else {
                             $authorization = new \App\Libraries\Authorization();
-                            if ($authorization->is_role_allowed($view_data['admin_session']['u_type'], ['TaskCoordinator'])) {
+                            if ($authorization->is_role_allowed($u_type, ['TaskCoordinator'])) {
                                 $menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');
-                            } else if ($authorization->is_role_allowed($view_data['admin_session']['u_type'], ['MailCoordinator'])) {
+                            } else if ($authorization->is_role_allowed($u_type, ['MailCoordinator'])) {
                                 //$menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');
                                 $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
                             } else {
-                                if ($view_data['admin_session']['u_type'] != 'Associate User') {
-                                    if ($view_data['admin_session']['u_type'] == 'Master Admin' || $view_data['admin_session']['u_type'] == 'Super Admin' || $view_data['admin_session']['u_type'] == 'Bim Head') {
+                                if ($u_type != 'Associate User') {
+                                    if ($u_type == 'Master Admin' || $u_type == 'Super Admin' || $u_type == 'Bim Head') {
                                         $menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');
                                         $menu['projects'] = array('Projects', 'home/projects', 'fa-sitemap');
                                         $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
                                         $menu['employees'] = array('Employees', 'home/employees', 'fa-users');
                                         $menu['settings'] = array('Settings', 'home/settings', 'fa-cogs');
                                     }
-                                    if ($view_data['admin_session']['u_type'] == 'Project Leader') {
+                                    if ($u_type == 'Project Leader') {
                                         $menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');
                                         //$menu['projects'] = array('Projects', 'home/projects', 'fa-sitemap');
                                         $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
@@ -237,7 +238,7 @@ if (isset($view_data['plugins'])) {
                                 $multi_level = array();
                                 $multi_levelticket = array();
                                 //$multi_level['leave_report'] = array('Leave Report', 'home/report_leave', 'fa-hand-o-right');
-                                if ($view_data['admin_session']['u_type'] == 'Master Admin' || $view_data['admin_session']['u_type'] == 'Bim Head' || $view_data['admin_session']['u_type'] == 'Super Admin') {
+                                if ($u_type == 'Master Admin' || $u_type == 'Bim Head' || $u_type == 'Super Admin') {
 
 
                                     $menu['empattendance'] = array('Employee Attendance', 'home/empattendance', 'fa-hand-o-right');
@@ -248,7 +249,7 @@ if (isset($view_data['plugins'])) {
                                     $multi_level['employee_attendance_report'] = array('Employee Atttendance Report', 'home/report_attendance_employee', 'fa-hand-o-right');
                                     $multi_level['project_data'] = array('Weekly Work Report', 'home/projectData', 'fa-hand-o-right');
                                     $multi_level['dependencies'] = array('Dependencies Report', 'home/dependencies', 'fa-hand-o-right');
-                                    if ($view_data['admin_session']['u_type'] == 'Master Admin')
+                                    if ($u_type == 'Master Admin')
                                         $multi_level['employee_salary_report'] = array('Employee Salary Report', 'home/report_employee_salary', 'fa-hand-o-right');
                                     $multi_level['report_dependency'] = array('Dependency', 'home/report_dependency', 'fa-hand-o-right');
                                     $multi_level['evsa_report'] = array('Estimated v/s Actual', 'home/report_estimated_actual', 'fa-hand-o-right');
@@ -275,14 +276,14 @@ if (isset($view_data['plugins'])) {
                                 $multi_levelticket['ticket'] = array('Ticket History', 'ticket/my', 'fa-ticket');
                                 $multi_levelticket['assignticket'] = array('Assign Tickets', 'ticket/assigned', 'fa-comment');
                                 $menu['tickets'] = array('Tickets', '#', 'fa-file', $multi_levelticket);
-                                if ($view_data['admin_session']['u_type'] == 'Project Leader') {
+                                if ($u_type == 'Project Leader') {
                                     $menu['dependency'] = array('Weekly Work + Dependency', 'home/dependency', 'fa-hand-o-right');
                                     $menu['dependencies'] = array('All Dependencies', 'home/dependencies', 'fa-hand-o-right');
-                                    if ($view_data['admin_session']['u_type'] == 'Project Leader' && $view_data['admin_session']['u_app_auth'] == '1') {
+                                    if ($u_type == 'Project Leader' && ($view_data['admin_session']['u_app_auth'] ?? '0') == '1') {
                                         $menu['usertask'] = array('Aashir Connect', 'usertask', 'fa-tasks');
                                     }
-                                } elseif ($view_data['admin_session']['u_app_auth'] == '1') {
-                                    if ($view_data['admin_session']['u_type'] != 'Associate User') {
+                                } elseif (($view_data['admin_session']['u_app_auth'] ?? '0') == '1') {
+                                    if ($u_type != 'Associate User') {
                                         $menu['conferences'] = array('Conferences', 'conference', 'fa-tasks');
                                         $menu['schedules'] = array('Schedules', 'schedule', 'fa-bell');
                                         $menu['company'] = array('Companies', 'company', 'fa-tasks');

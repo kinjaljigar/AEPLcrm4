@@ -276,7 +276,7 @@ function assign_users() {
             {
                 act_sub = 'add';
             } else {
-                act_sub = 'remove';
+                act_sub = 'del';
             }
             doAjax('api/tasks', 'POST', {
                 t_id: t_id,

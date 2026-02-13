@@ -873,7 +873,7 @@
                 $.each(box, function(key, value) {
                     $('#' + key).html(value);
                 });
-                $("#dataTableDepartments").html(res.data.rows);
+                $("#dataTableDepartments").html(res.data.rows).show();
             } else {
                 showModal('ok', res.message, 'Error!', 'modal-danger', 'modal-sm');
             }
@@ -925,11 +925,11 @@
                         </thead>
                         <tbody>
                 `;
-                    console.log(d);
                     res.data.forEach((d, i) => {
                         html += `
                     <tr>
                         <td>${i + 1}</td><td>${formatDateDMY(d.created_date)}</td>
+                        <td>${d.project_name || '-'}</td>
                         <td>${d.dependency_text || '-'}</td>
                         <td>${d.created_by || '-'}</td>
                         
@@ -1133,7 +1133,7 @@
                 if (res.status == 'pass') {
                     showModal('ok', res.message, 'Success', 'modal-success', 'modal-sm', function() {},
                         function() {
-                            dataTable.ajax.reload();
+                            dataTableLeaves.ajax.reload();
                         });
                 } else {
                     if (res.type != 'undefined' && res.type == 'popup') {

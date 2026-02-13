@@ -5,7 +5,7 @@ namespace App\Controllers;
 use CodeIgniter\Controller;
 use App\Models\UserModel;
 
-class Api extends Controller
+class Api extends BaseController
 {
     public function login()
     {
@@ -80,87 +80,261 @@ class Api extends Controller
 
         header('Content-Type: application/json');
 
+        $request = service('request');
         $db = \Config\Database::connect();
         $session = service('session');
         $admin_session = $session->get('admin_session');
         $u_type = $admin_session['u_type'] ?? '';
         $u_id = $admin_session['u_id'] ?? 0;
+        $type = $request->getPost('type') ?? 'basic';
 
         // For Project Leader, filter by assigned projects
         $isLeader = ($u_type == 'Project Leader');
 
-        // Get project counts
-        $pBuilder = $db->table('aa_projects');
-        if ($isLeader) {
-            $pBuilder->like('p_leader', $u_id);
+        switch ($type) {
+            case 'basic':
+                // Get project counts
+                $pBuilder = $db->table('aa_projects');
+                if ($isLeader) $pBuilder->like('p_leader', $u_id);
+                $total_projects = $pBuilder->countAllResults();
+
+                $pBuilder = $db->table('aa_projects')->where('p_status', 'Active');
+                if ($isLeader) $pBuilder->like('p_leader', $u_id);
+                $active_projects = $pBuilder->countAllResults();
+
+                $pBuilder = $db->table('aa_projects')->where('p_status', 'Completed');
+                if ($isLeader) $pBuilder->like('p_leader', $u_id);
+                $completed_projects = $pBuilder->countAllResults();
+
+                $pBuilder = $db->table('aa_projects')->where('p_status', 'Hold');
+                if ($isLeader) $pBuilder->like('p_leader', $u_id);
+                $hold_projects = $pBuilder->countAllResults();
+
+                // Get task counts
+                if ($isLeader) {
+                    $leaderProjects = $db->table('aa_projects')->select('p_id')->like('p_leader', $u_id)->get()->getResultArray();
+                    $projectIds = array_column($leaderProjects, 'p_id');
+                    if (!empty($projectIds)) {
+                        $total_tasks = $db->table('aa_tasks')->whereIn('t_p_id', $projectIds)->countAllResults();
+                        $pending_tasks = $db->table('aa_tasks')->whereIn('t_p_id', $projectIds)->where('t_status', 'Pending')->countAllResults();
+                        $inprogress_tasks = $db->table('aa_tasks')->whereIn('t_p_id', $projectIds)->where('t_status', 'In Progress')->countAllResults();
+                        $completed_tasks = $db->table('aa_tasks')->whereIn('t_p_id', $projectIds)->where('t_status', 'Completed')->countAllResults();
+                    } else {
+                        $total_tasks = $pending_tasks = $inprogress_tasks = $completed_tasks = 0;
+                    }
+                } else {
+                    $total_tasks = $db->table('aa_tasks')->countAllResults();
+                    $pending_tasks = $db->table('aa_tasks')->where('t_status', 'Pending')->countAllResults();
+                    $inprogress_tasks = $db->table('aa_tasks')->where('t_status', 'In Progress')->countAllResults();
+                    $completed_tasks = $db->table('aa_tasks')->where('t_status', 'Completed')->countAllResults();
+                }
+
+                // Get employee counts
+                $total_employee = $db->table('aa_users')->where('u_type !=', 'Associate User')->countAllResults();
+                $active_employees = $db->table('aa_users')->where('u_type !=', 'Associate User')->where('u_status', 'Active')->countAllResults();
+
+                // Department-wise employee counts
+                $departments = $db->table('aa_users')
+                    ->select('u_department, COUNT(*) as cnt')
+                    ->where('u_status', 'Active')
+                    ->where('u_type !=', 'Associate User')
+                    ->groupBy('u_department')
+                    ->get()->getResultArray();
+
+                // Build department rows HTML
+                $deptHtml = '<thead><tr><th>Department</th><th>Count</th></tr></thead><tbody>';
+                foreach ($departments as $dept) {
+                    $deptHtml .= '<tr><td>' . htmlspecialchars($dept['u_department'] ?? 'N/A') . '</td><td>' . $dept['cnt'] . '</td></tr>';
+                }
+                $deptHtml .= '</tbody>';
+
+                echo json_encode([
+                    'status' => 'pass',
+                    'data' => [
+                        'box' => [
+                            'total_projects' => $total_projects,
+                            'active_projects' => $active_projects,
+                            'completed_projects' => $completed_projects,
+                            'hold_projects' => $hold_projects,
+                            'total_tasks' => $total_tasks,
+                            'pending_tasks' => $pending_tasks,
+                            'inprogress_tasks' => $inprogress_tasks,
+                            'completed_tasks' => $completed_tasks,
+                            'total_employee' => $total_employee,
+                            'active_employees' => $active_employees
+                        ],
+                        'rows' => $deptHtml
+                    ]
+                ]);
+                exit;
+
+            case 'leaves':
+                $leaderid = $request->getPost('leaderid');
+                $builder = $db->table('aa_leaves L')
+                    ->select('L.*, U.u_name')
+                    ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
+                    ->where('L.l_status', 'Pending')
+                    ->orderBy('L.l_id', 'DESC');
+
+                if (!empty($leaderid)) {
+                    // For project leaders, show leaves of employees under them
+                    $builder->where('U.u_leader', $leaderid);
+                }
+
+                $leaves = $builder->get()->getResultArray();
+                $data = [];
+                foreach ($leaves as $leave) {
+                    $row = [];
+                    $row[] = $leave['u_name'] ?? '';
+                    $row[] = !empty($leave['l_create_date']) ? convert_db2display($leave['l_create_date'], false) : '';
+                    $row[] = !empty($leave['l_from_date']) ? convert_db2display($leave['l_from_date'], false) : '';
+                    $row[] = !empty($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '';
+
+                    // Hourly / Half Day Leave
+                    $leaveType = '';
+                    if (($leave['l_is_halfday'] ?? '') === 'Yes') $leaveType = 'Half Day (' . ($leave['l_halfday_time'] ?? '') . ')';
+                    elseif (($leave['l_is_hourly'] ?? '') === 'Yes') $leaveType = 'Hourly (' . ($leave['l_hourly_time'] ?? '') . ')';
+                    $row[] = $leaveType;
+
+                    // # of Days
+                    $days = 1;
+                    if (!empty($leave['l_from_date']) && !empty($leave['l_to_date'])) {
+                        $from = strtotime($leave['l_from_date']);
+                        $to = strtotime($leave['l_to_date']);
+                        $days = max(1, round(($to - $from) / 86400) + 1);
+                        if (($leave['l_is_halfday'] ?? '') === 'Yes') $days = 0.5;
+                    }
+                    $row[] = $days;
+
+                    // Action
+                    $row[] = '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ')" class="btn btn-success btn-xs">Manage</a>';
+                    $data[] = $row;
+                }
+
+                echo json_encode([
+                    'draw' => $request->getPost('draw') ?? 1,
+                    'recordsTotal' => count($data),
+                    'recordsFiltered' => count($data),
+                    'data' => $data
+                ]);
+                exit;
+
+            case 'leavestoday':
+                $leaderid = $request->getPost('leaderid');
+                $today = date('Y-m-d');
+                $builder = $db->table('aa_leaves L')
+                    ->select('L.*, U.u_name, U.u_department')
+                    ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
+                    ->where('L.l_status', 'Approve')
+                    ->where('L.l_from_date <=', $today)
+                    ->where('L.l_to_date >=', $today)
+                    ->orderBy('U.u_name', 'ASC');
+
+                if (!empty($leaderid)) {
+                    $builder->where('U.u_leader', $leaderid);
+                }
+
+                $leaves = $builder->get()->getResultArray();
+                $data = [];
+                foreach ($leaves as $leave) {
+                    $row = [];
+                    $row[] = $leave['u_name'] ?? '';
+                    $row[] = $leave['u_department'] ?? '';
+                    $row[] = ($leave['l_is_halfday'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_halfday_time'] ?? '') . ')' : 'No';
+                    $row[] = ($leave['l_is_hourly'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_hourly_time'] ?? '') . ')' : 'No';
+                    $row[] = $leave['l_approved_by'] ?? '';
+                    $data[] = $row;
+                }
+
+                echo json_encode([
+                    'draw' => $request->getPost('draw') ?? 1,
+                    'recordsTotal' => count($data),
+                    'recordsFiltered' => count($data),
+                    'data' => $data
+                ]);
+                exit;
+
+            case 'present_list_limit':
+                // Get all active employees who are NOT on leave today
+                $today = date('Y-m-d');
+                $onLeaveIds = $db->table('aa_leaves')
+                    ->select('l_u_id')
+                    ->where('l_status', 'Approve')
+                    ->where('l_from_date <=', $today)
+                    ->where('l_to_date >=', $today)
+                    ->get()->getResultArray();
+                $leaveUserIds = array_column($onLeaveIds, 'l_u_id');
+
+                $builder = $db->table('aa_users')
+                    ->select('u_name, u_email, u_mobile, u_type, u_department')
+                    ->where('u_status', 'Active')
+                    ->where('u_type !=', 'Associate User')
+                    ->orderBy('u_department', 'ASC')
+                    ->orderBy('u_name', 'ASC');
+
+                if (!empty($leaveUserIds)) {
+                    $builder->whereNotIn('u_id', $leaveUserIds);
+                }
+
+                $employees = $builder->get()->getResultArray();
+                $data = [];
+                foreach ($employees as $emp) {
+                    $data[] = [
+                        $emp['u_name'],
+                        $emp['u_email'] ?? '',
+                        $emp['u_mobile'] ?? '',
+                        $emp['u_type'],
+                        $emp['u_department'] ?? ''
+                    ];
+                }
+
+                echo json_encode([
+                    'draw' => $request->getPost('draw') ?? 1,
+                    'recordsTotal' => count($data),
+                    'recordsFiltered' => count($data),
+                    'data' => $data
+                ]);
+                exit;
+
+            case 'under_watch':
+                $projects = $db->table('aa_projects')
+                    ->where('p_show_dashboard', 'Yes')
+                    ->orderBy('p_name', 'ASC')
+                    ->get()->getResultArray();
+
+                $data = [];
+                foreach ($projects as $project) {
+                    // Get total expenses
+                    $expenses = $db->table('aa_project_expense')
+                        ->selectSum('pe_val')
+                        ->where('pe_p_id', $project['p_id'])
+                        ->get()->getRowArray();
+                    $total_expense = floatval($expenses['pe_val'] ?? 0);
+                    $p_value = floatval($project['p_value'] ?? 0);
+                    $profit = $p_value - $total_expense;
+
+                    $data[] = [
+                        htmlspecialchars($project['p_name']),
+                        !empty($project['p_created']) ? convert_db2display($project['p_created'], false) : '',
+                        number_format($p_value, 2),
+                        number_format($total_expense, 2),
+                        number_format($profit, 2),
+                        $project['p_status']
+                    ];
+                }
+
+                echo json_encode([
+                    'draw' => $request->getPost('draw') ?? 1,
+                    'recordsTotal' => count($data),
+                    'recordsFiltered' => count($data),
+                    'data' => $data
+                ]);
+                exit;
+
+            default:
+                echo json_encode(['status' => 'fail', 'message' => 'Unknown dashboard type.']);
+                exit;
         }
-        $total_projects = $pBuilder->countAllResults();
-
-        $pBuilder = $db->table('aa_projects')->where('p_status', 'Active');
-        if ($isLeader) $pBuilder->like('p_leader', $u_id);
-        $active_projects = $pBuilder->countAllResults();
-
-        $pBuilder = $db->table('aa_projects')->where('p_status', 'Completed');
-        if ($isLeader) $pBuilder->like('p_leader', $u_id);
-        $completed_projects = $pBuilder->countAllResults();
-
-        $pBuilder = $db->table('aa_projects')->where('p_status', 'Hold');
-        if ($isLeader) $pBuilder->like('p_leader', $u_id);
-        $hold_projects = $pBuilder->countAllResults();
-
-        // Get task counts - for Project Leader, only tasks in their projects
-        if ($isLeader) {
-            // Get project IDs assigned to this leader
-            $leaderProjects = $db->table('aa_projects')
-                ->select('p_id')
-                ->like('p_leader', $u_id)
-                ->get()->getResultArray();
-            $projectIds = array_column($leaderProjects, 'p_id');
-
-            if (!empty($projectIds)) {
-                $total_tasks = $db->table('aa_tasks')->whereIn('t_p_id', $projectIds)->countAllResults();
-                $pending_tasks = $db->table('aa_tasks')->whereIn('t_p_id', $projectIds)->where('t_status', 'Pending')->countAllResults();
-                $inprogress_tasks = $db->table('aa_tasks')->whereIn('t_p_id', $projectIds)->where('t_status', 'In Progress')->countAllResults();
-                $completed_tasks = $db->table('aa_tasks')->whereIn('t_p_id', $projectIds)->where('t_status', 'Completed')->countAllResults();
-            } else {
-                $total_tasks = $pending_tasks = $inprogress_tasks = $completed_tasks = 0;
-            }
-        } else {
-            $total_tasks = $db->table('aa_tasks')->countAllResults();
-            $pending_tasks = $db->table('aa_tasks')->where('t_status', 'Pending')->countAllResults();
-            $inprogress_tasks = $db->table('aa_tasks')->where('t_status', 'In Progress')->countAllResults();
-            $completed_tasks = $db->table('aa_tasks')->where('t_status', 'Completed')->countAllResults();
-        }
-
-        // Get employee counts
-        $total_employees = $db->table('aa_users')
-            ->where('u_type !=', 'Associate User')
-            ->countAllResults();
-        $active_employees = $db->table('aa_users')
-            ->where('u_type !=', 'Associate User')
-            ->where('u_status', 'Active')
-            ->countAllResults();
-
-        $response = [
-            'status' => 'pass',
-            'data' => [
-                'box' => [
-                    'total_projects' => $total_projects,
-                    'active_projects' => $active_projects,
-                    'completed_projects' => $completed_projects,
-                    'hold_projects' => $hold_projects,
-                    'total_tasks' => $total_tasks,
-                    'pending_tasks' => $pending_tasks,
-                    'inprogress_tasks' => $inprogress_tasks,
-                    'completed_tasks' => $completed_tasks,
-                    'total_employees' => $total_employees,
-                    'active_employees' => $active_employees
-                ]
-            ]
-        ];
-
-        echo json_encode($response);
-        exit;
     }
 
     public function fetchDesktopNotifications()
@@ -198,8 +372,15 @@ class Api extends Controller
         if (!empty($project['p_leader'])) {
             $userIds = array_merge($userIds, explode(',', $project['p_leader']));
         }
-        if (!empty($project['p_employees'])) {
-            $userIds = array_merge($userIds, explode(',', $project['p_employees']));
+        // Get users assigned to tasks in this project
+        $projectUsers = $db->table('aa_task2user')
+            ->distinct()
+            ->select('tu_u_id')
+            ->where('tu_p_id', $projectId)
+            ->where('tu_removed', 'No')
+            ->get()->getResultArray();
+        foreach ($projectUsers as $pu) {
+            $userIds[] = $pu['tu_u_id'];
         }
         $userIds = array_unique(array_filter($userIds));
 
@@ -588,7 +769,10 @@ class Api extends Controller
                 foreach ($tasks as $task) {
                     $row = [];
                     $row[] = $sr++;
-                    $row[] = $task['p_name'] ?? '';
+                    // Skip project name column when viewing a specific project (project_detail page)
+                    if (!($t_p_id > 0)) {
+                        $row[] = $task['p_name'] ?? '';
+                    }
                     $row[] = $task['t_title'] ?? '';
                     $row[] = $task['t_priority'] ?? '';
                     $row[] = isset($task['t_createdate']) ? convert_db2display($task['t_createdate'], false) : '';
@@ -645,6 +829,213 @@ class Api extends Controller
 
         $act = $request->getPost('act');
         $p_id = $request->getPost('p_id');
+        $db = \Config\Database::connect();
+
+        // Handle Add/Edit
+        if ($act === 'add') {
+            $p_id = $p_id ?? 0;
+            $projectData = [
+                'p_number' => $request->getPost('p_number'),
+                'p_name' => $request->getPost('p_name'),
+                'p_value' => $request->getPost('p_value') ?? 0,
+                'p_contact' => $request->getPost('p_contact') ?? '',
+                'p_cat' => $request->getPost('p_cat') ?? '',
+                'p_status' => $request->getPost('p_status') ?? 'Active',
+                'p_address' => $request->getPost('p_address') ?? '',
+                'p_scope' => $request->getPost('p_scope') ?? '',
+                'p_show_dashboard' => $request->getPost('p_show_dashboard') ?? 'No',
+                'p_leader' => is_array($request->getPost('p_leader')) ? implode(',', $request->getPost('p_leader')) : ($request->getPost('p_leader') ?? ''),
+            ];
+
+            if ($p_id > 0) {
+                $projectData['p_updated'] = date('Y-m-d H:i:s');
+                $db->table('aa_projects')->where('p_id', $p_id)->update($projectData);
+            } else {
+                $projectData['p_created'] = date('Y-m-d H:i:s');
+                $projectData['p_updated'] = date('Y-m-d H:i:s');
+                $db->table('aa_projects')->insert($projectData);
+                $p_id = $db->insertID();
+            }
+
+            // Handle project expenses
+            if ($admin_session['u_type'] == 'Master Admin') {
+                $db->table('aa_project_expense')->where('pe_p_id', $p_id)->delete();
+                $pe_lbls = $request->getPost('pe_lbl') ?? [];
+                $pe_vals = $request->getPost('pe_val') ?? [];
+                if (is_array($pe_lbls)) {
+                    foreach ($pe_lbls as $i => $lbl) {
+                        if (!empty(trim($lbl ?? ''))) {
+                            $db->table('aa_project_expense')->insert([
+                                'pe_p_id' => $p_id,
+                                'pe_lbl' => $lbl,
+                                'pe_val' => $pe_vals[$i] ?? 0,
+                            ]);
+                        }
+                    }
+                }
+            }
+
+            echo json_encode(['status' => 'pass', 'message' => 'Project saved successfully.']);
+            exit;
+        }
+
+        // Handle Delete
+        if ($act === 'del') {
+            if ($p_id) {
+                $db->table('aa_projects')->where('p_id', $p_id)->delete();
+                $db->table('aa_project_expense')->where('pe_p_id', $p_id)->delete();
+                echo json_encode(['status' => 'pass', 'message' => 'Project deleted successfully.']);
+            } else {
+                echo json_encode(['status' => 'fail', 'message' => 'Invalid project.']);
+            }
+            exit;
+        }
+
+        // Handle Teams tab (project_detail)
+        if ($act === 'teams') {
+            $draw = $request->getPost('draw') ?? 1;
+            try {
+                $sql = "SELECT total_salary as final_salary, u_salary, u_email, work_hour_total, u_id, u_name FROM (SELECT (SUM((at_end - at_start) / 60 * US.u_salary)) as total_salary, SUM((at_end - at_start) / 60) as work_hour_total, U.u_id as UserId, U.u_name as u_name, U.u_salary, U.u_email, U.u_id FROM aa_attendance A INNER JOIN aa_users_salary US ON A.at_u_id = US.u_id, aa_users as U WHERE at_p_id = ? and at_date >= US.u_start_date and at_date < US.u_end_date and U.u_id = US.u_id group by U.u_id) as FinnalDB";
+                $records = $db->query($sql, [$p_id])->getResultArray();
+            } catch (\Exception $e) {
+                // Fallback if aa_users_salary table doesn't exist
+                $records = [];
+            }
+            $totalData = count($records);
+            $result = [];
+            $total = 0;
+            foreach ($records as $rec) {
+                $rec['work_hour_total'] = $rec['work_hour_total'] ?? 0;
+                $nestedData = [];
+                $nestedData[] = '<label class="check_container"><input type="checkbox" id="u_ids_' . $rec['u_id'] . '" name="u_id[]" value="' . $rec['u_email'] . '" class="teammet"><span class="checkmark"></span></label>';
+                $nestedData[] = $rec['u_name'];
+                $nestedData[] = $rec['u_email'];
+
+                $whole = floor($rec['work_hour_total']);
+                $fraction = $rec['work_hour_total'] - $whole;
+                if ($fraction == '.75') $work_hour_total = str_replace($fraction, '.75', '.45');
+                else if ($fraction == '.25') $work_hour_total = str_replace($fraction, '.25', '.15');
+                else if ($fraction == '.50') $work_hour_total = str_replace($fraction, '.50', '.30');
+                else $work_hour_total = $fraction;
+                $nestedData[] = number_format($whole + $work_hour_total, 2);
+
+                if ($admin_session['u_type'] == 'Master Admin') {
+                    $nestedData[] = $rec['u_salary'];
+                    $nestedData[] = $rec['final_salary'] ?? 0;
+                } else {
+                    $nestedData[] = 0;
+                    $nestedData[] = 0;
+                }
+                $result[] = $nestedData;
+                if ($admin_session['u_type'] == 'Master Admin')
+                    $total = $total + ($rec['final_salary'] ?? 0);
+            }
+            echo json_encode([
+                'draw' => intval($draw),
+                'recordsTotal' => intval($totalData + 1),
+                'recordsFiltered' => intval($totalData + 1),
+                'data' => $result,
+                'total_val' => number_format($total, 2)
+            ]);
+            exit;
+        }
+
+        // Handle Accounts tab (project_detail)
+        if ($act === 'accounts') {
+            $draw = $request->getPost('draw') ?? 1;
+            $expenses = $db->table('aa_project_expense')
+                ->where('pe_p_id', $p_id)
+                ->get()->getResultArray();
+            $totalData = count($expenses);
+            $result = [];
+            $total = 0;
+            foreach ($expenses as $exp) {
+                $result[] = [$exp['pe_lbl'], number_format($exp['pe_val'], 2)];
+                $total += floatval($exp['pe_val']);
+            }
+            // Add salary row
+            try {
+                $sql = "SELECT SUM(total_salary) as final_salary FROM (SELECT ((at_end - at_start) / 60 * u_salary) as total_salary FROM aa_attendance A INNER JOIN aa_users_salary U ON A.at_u_id = U.u_id WHERE at_p_id = ? and at_date >= u_start_date and at_date < u_end_date) as FinnalDB";
+                $salaryResult = $db->query($sql, [$p_id])->getRowArray();
+                $totalSalary = floatval($salaryResult['final_salary'] ?? 0);
+            } catch (\Exception $e) {
+                $totalSalary = 0;
+            }
+            $result[] = ['Salary', number_format($totalSalary, 2)];
+            echo json_encode([
+                'draw' => intval($draw),
+                'recordsTotal' => intval($totalData + 1),
+                'recordsFiltered' => intval($totalData + 1),
+                'data' => $result,
+                'total_val' => number_format($total + $totalSalary, 2)
+            ]);
+            exit;
+        }
+
+        // Handle Verbal Communication add
+        if ($act === 'vcom_add') {
+            $pv_p_id = $request->getPost('pv_p_id');
+            $pv_text = $request->getPost('pv_text');
+            try {
+                $db->table('aa_project_vcom')->insert([
+                    'pv_p_id' => $pv_p_id,
+                    'pv_u_id' => $admin_session['u_id'],
+                    'pv_text' => $pv_text,
+                    'pv_datetime' => date('Y-m-d H:i:s'),
+                ]);
+                echo json_encode(['status' => 'pass', 'message' => 'Record is saved.']);
+            } catch (\Exception $e) {
+                echo json_encode(['status' => 'fail', 'type' => 'popup', 'message' => $e->getMessage()]);
+            }
+            exit;
+        }
+
+        // Handle Verbal Communication list
+        if ($act === 'vcom_list') {
+            $pv_p_id = $request->getPost('pv_p_id');
+            $draw = $request->getPost('draw') ?? 1;
+            $records = $db->table('aa_project_vcom V')
+                ->select('V.*, U.u_name')
+                ->join('aa_users U', 'V.pv_u_id = U.u_id')
+                ->where('V.pv_p_id', $pv_p_id)
+                ->orderBy('V.pv_datetime', 'DESC')
+                ->get()->getResultArray();
+            $totalData = count($records);
+            $result = [];
+            foreach ($records as $rec) {
+                $result[] = [
+                    convert_db2display($rec['pv_datetime']),
+                    $rec['pv_text'],
+                    $rec['u_name']
+                ];
+            }
+            echo json_encode([
+                'draw' => intval($draw),
+                'recordsTotal' => intval($totalData + 1),
+                'recordsFiltered' => intval($totalData + 1),
+                'data' => $result,
+            ]);
+            exit;
+        }
+
+        // Handle Email send
+        if ($act === 'email') {
+            $email_list = $request->getPost('email_list');
+            $email_subject = $request->getPost('email_subject');
+            $email_message = $request->getPost('email_message');
+            try {
+                $email = \Config\Services::email();
+                $email->setFrom('noreply@dummyproject.com', 'CRM');
+                $email->setTo($email_list);
+                $email->setSubject($email_subject);
+                $email->setMessage($email_message);
+                $email->send();
+                echo json_encode(['status' => 'pass', 'message' => 'Email sent successfully.']);
+            } catch (\Exception $e) {
+                echo json_encode(['status' => 'fail', 'message' => 'Email could not be sent: ' . $e->getMessage()]);
+            }
+            exit;
+        }
 
         // Handle single record fetch for edit
         if ($act === 'list' && $p_id) {
@@ -655,7 +1046,6 @@ class Api extends Controller
                 // Get project expenses if Master Admin
                 $pe = [];
                 if ($admin_session['u_type'] == 'Master Admin') {
-                    $db = \Config\Database::connect();
                     $pe = $db->table('aa_project_expense')
                         ->where('pe_p_id', $p_id)
                         ->get()
@@ -677,19 +1067,15 @@ class Api extends Controller
         }
 
         // Handle DataTables list request
-        $projectModel = new \App\Models\ProjectModel();
-        $db = \Config\Database::connect();
-
         // Get filters
         $txt_search = $request->getPost('txt_search');
         $txt_p_cat = $request->getPost('txt_p_cat');
         $txt_p_status = $request->getPost('txt_p_status') ?: 'Active';
         $txt_p_leader = $request->getPost('txt_p_leader');
 
-        // Build query with joins
+        // Build query
         $builder = $db->table('aa_projects P');
-        $builder->select('P.*, U.u_name as leader_name');
-        $builder->join('aa_users U', 'P.p_leader = U.u_id', 'left');
+        $builder->select('P.*');
 
         // Apply filters
         if (!empty($txt_search)) {
@@ -705,7 +1091,8 @@ class Api extends Controller
         }
 
         if (!empty($txt_p_leader)) {
-            $builder->where('P.p_leader', $txt_p_leader);
+            // Use FIND_IN_SET for comma-separated leader IDs
+            $builder->where("FIND_IN_SET('{$txt_p_leader}', P.p_leader) >", 0, false);
         }
 
         // Get total count
@@ -743,14 +1130,30 @@ class Api extends Controller
             }
 
             $row[] = $project['p_status'];
-            $row[] = $project['leader_name'] ?? '';
+
+            // Get leader names
+            $leader_names = [];
+            if (!empty($project['p_leader'])) {
+                $leader_ids = explode(',', $project['p_leader']);
+                $leaders = $db->table('aa_users')
+                    ->select('u_name')
+                    ->whereIn('u_id', $leader_ids)
+                    ->get()
+                    ->getResultArray();
+                foreach ($leaders as $leader) {
+                    $leader_names[] = $leader['u_name'];
+                }
+            }
+            $row[] = implode(', ', $leader_names);
 
             // Action buttons
             $actions = '<div class="actions">';
-            $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $project['p_id'] . ', \'' . $admin_session['u_type'] . '\')" class="btn btn-primary btn-xs"><i class="fa fa-edit"></i></a> ';
+            $actions .= '<a href="' . base_url('home/project_detail/' . $project['p_id']) . '" class="btn btn-success btn-xs" title="View"><i class="fa fa-eye"></i></a> ';
+            $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $project['p_id'] . ', \'' . $admin_session['u_type'] . '\')" class="btn btn-primary btn-xs" title="Edit"><i class="fa fa-edit"></i></a> ';
+            $actions .= '<a href="' . base_url('home/project_contacts/' . $project['p_id']) . '" class="btn btn-info btn-xs" title="Project Contacts"><i class="fa fa-address-book"></i></a> ';
 
             if ($admin_session['u_type'] == 'Super Admin' || $admin_session['u_type'] == 'Master Admin') {
-                $actions .= '<a href="javascript://" onclick="deleteRecord(' . $project['p_id'] . ')" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i></a>';
+                $actions .= '<a href="javascript://" onclick="deleteRecord(' . $project['p_id'] . ')" class="btn btn-danger btn-xs" title="Delete"><i class="fa fa-trash"></i></a>';
             }
             $actions .= '</div>';
 
@@ -786,6 +1189,66 @@ class Api extends Controller
 
         $act = $request->getPost('act');
         $u_id = $request->getPost('u_id');
+
+        // Handle Add/Edit
+        if ($act === 'add') {
+            $u_id = $u_id ?? 0;
+            $userData = [
+                'u_username' => $request->getPost('u_username'),
+                'u_name' => $request->getPost('u_name'),
+                'u_type' => $request->getPost('u_type') ?? 'Employee',
+                'u_mobile' => $request->getPost('u_mobile') ?? '',
+                'u_email' => $request->getPost('u_email') ?? '',
+                'u_address' => $request->getPost('u_address') ?? '',
+                'u_qualification' => $request->getPost('u_qualification') ?? '',
+                'u_department' => $request->getPost('u_department') ?? 'Architecture',
+                'u_status' => $request->getPost('u_status') ?? 'Active',
+                'u_leader' => $request->getPost('u_leader') ?? 0,
+                'u_salary' => $request->getPost('u_salary') ?? 0,
+                'u_app_auth' => $request->getPost('u_app_auth') ?? '0',
+                'u_join_date' => !empty($request->getPost('u_join_date')) ? convert_display2db($request->getPost('u_join_date')) : date('Y-m-d'),
+                'u_leave_date' => !empty($request->getPost('u_leave_date')) ? convert_display2db($request->getPost('u_leave_date')) : '0000-00-00',
+                'u_comments' => $request->getPost('u_comments') ?? '',
+            ];
+
+            $password = $request->getPost('u_password');
+            if (!empty($password)) {
+                $userData['u_password'] = md5($password);
+            }
+
+            if ($u_id > 0) {
+                $userData['updated_at'] = date('Y-m-d H:i:s');
+                $db->table('aa_users')->where('u_id', $u_id)->update($userData);
+            } else {
+                if (empty($password)) {
+                    echo json_encode(['status' => 'fail', 'message' => 'Password is required for new employee.', 'type' => 'popup']);
+                    exit;
+                }
+                // Check if username exists
+                $existing = $db->table('aa_users')->where('u_username', $userData['u_username'])->get()->getRowArray();
+                if ($existing) {
+                    echo json_encode(['status' => 'fail', 'message' => 'Username already exists.', 'type' => 'popup']);
+                    exit;
+                }
+                $userData['created_at'] = date('Y-m-d H:i:s');
+                $userData['updated_at'] = date('Y-m-d H:i:s');
+                $db->table('aa_users')->insert($userData);
+            }
+
+            echo json_encode(['status' => 'pass', 'message' => 'Employee saved successfully.']);
+            exit;
+        }
+
+        // Handle Delete
+        if ($act === 'del') {
+            if ($u_id) {
+                $db->table('aa_users')->where('u_id', $u_id)->delete();
+                echo json_encode(['status' => 'pass', 'message' => 'Employee deleted successfully.']);
+            } else {
+                echo json_encode(['status' => 'fail', 'message' => 'Invalid employee.']);
+            }
+            exit;
+        }
 
         // Handle single record fetch for edit
         if ($act === 'list' && $u_id) {
@@ -843,12 +1306,12 @@ class Api extends Controller
             $row[] = $employee['u_name'];
             $row[] = $employee['u_email'];
             $row[] = $employee['u_mobile'];
-            $row[] = $employee['u_salary_per_hour'] ?? '';
+            $row[] = $employee['u_salary'] ?? '';
             $row[] = $employee['u_type'];
 
             // Action buttons
             $actions = '<div class="actions">';
-            $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $employee['u_id'] . ')" class="btn btn-primary btn-xs"><i class="fa fa-edit"></i></a> ';
+            $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $employee['u_id'] . ', \'' . $admin_session['u_type'] . '\')" class="btn btn-primary btn-xs"><i class="fa fa-edit"></i></a> ';
 
             if ($admin_session['u_type'] == 'Master Admin') {
                 $actions .= '<a href="javascript://" onclick="deleteRecord(' . $employee['u_id'] . ')" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i></a>';
@@ -983,19 +1446,19 @@ class Api extends Controller
                         $u_id = $admin_session['u_id'];
                         $u_type = $admin_session['u_type'];
 
-                        $builder = $db->table('aa_projects');
-                        $builder->select('p_id, p_name, p_number');
-                        $builder->where('p_status', 'Active');
-
-                        if (!in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
-                            $builder->groupStart();
-                            $builder->like('p_leader', $u_id);
-                            $builder->orLike('p_employees', $u_id);
-                            $builder->groupEnd();
+                        if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
+                            $builder = $db->table('aa_projects');
+                            $builder->select('p_id, p_name, p_number');
+                            $builder->where('p_status', 'Active');
+                            $builder->orderBy('p_name', 'ASC');
+                            $projects = $builder->get()->getResultArray();
+                        } else {
+                            // Get projects where user is leader or assigned to tasks
+                            $projects = $db->query("SELECT DISTINCT P.p_id, P.p_name, P.p_number FROM aa_projects P
+                                LEFT JOIN aa_task2user TU ON P.p_id = TU.tu_p_id AND TU.tu_removed = 'No'
+                                WHERE P.p_status = 'Active' AND (P.p_leader LIKE '%{$u_id}%' OR TU.tu_u_id = '{$u_id}')
+                                ORDER BY P.p_name ASC")->getResultArray();
                         }
-
-                        $builder->orderBy('p_name', 'ASC');
-                        $projects = $builder->get()->getResultArray();
 
                         $html = '<option value="">-- Select Project --</option>';
                         foreach ($projects as $project) {
@@ -1124,6 +1587,14 @@ class Api extends Controller
         $id = $request->getPost('id');
         $act = $request->getPost('act');
 
+        // Handle Add/Edit (update setting value)
+        if ($act === 'add' && $id) {
+            $s_value = $request->getPost('s_value') ?? '';
+            $db->table('aa_settings')->where('id', $id)->update(['s_value' => $s_value]);
+            echo json_encode(['status' => 'pass', 'message' => 'Setting updated successfully.']);
+            exit;
+        }
+
         // Handle single record fetch for edit
         if ($act === 'list' && $id) {
             $builder = $db->table('aa_settings');
@@ -1178,11 +1649,165 @@ class Api extends Controller
         header('Content-Type: application/json');
 
         $request = service('request');
+        $session = service('session');
+        $admin_session = $session->get('admin_session');
         $db = \Config\Database::connect();
 
+        $act = $request->getPost('act');
+        $l_id = $request->getPost('l_id');
+
+        // Handle Add/Edit leave request
+        if ($act === 'add') {
+            $leaveData = [
+                'l_u_id' => $admin_session['u_id'],
+                'l_from_date' => !empty($request->getPost('l_from_date')) ? convert_display2db($request->getPost('l_from_date')) : null,
+                'l_to_date' => !empty($request->getPost('l_to_date')) ? convert_display2db($request->getPost('l_to_date')) : null,
+                'l_message' => $request->getPost('l_message') ?? '',
+                'l_is_halfday' => $request->getPost('l_is_halfday') ?? 'No',
+                'l_halfday_time' => $request->getPost('l_halfday_time') ?? '',
+                'l_is_hourly' => $request->getPost('l_is_hourly') ?? 'No',
+                'l_hourly_time' => $request->getPost('l_hourly_time') ?? '',
+                'l_hourly_time_hour' => $request->getPost('l_hourly_time_hour') ?? '',
+            ];
+
+            try {
+                if ($l_id > 0) {
+                    $db->table('aa_leaves')->where('l_id', $l_id)->update($leaveData);
+                } else {
+                    $leaveData['l_create_date'] = date('Y-m-d');
+                    $leaveData['l_status'] = 'Pending';
+                    $db->table('aa_leaves')->insert($leaveData);
+                }
+                echo json_encode(['status' => 'pass', 'message' => 'Leave request saved successfully.']);
+            } catch (\Exception $ex) {
+                echo json_encode(['status' => 'fail', 'type' => 'popup', 'message' => $ex->getMessage()]);
+            }
+            exit;
+        }
+
+        // Handle Delete
+        if ($act === 'del') {
+            if ($l_id > 0) {
+                $db->table('aa_leaves')->where('l_id', $l_id)->delete();
+                echo json_encode(['status' => 'pass', 'message' => 'Leave deleted successfully.']);
+            } else {
+                echo json_encode(['status' => 'fail', 'message' => 'Invalid leave record.']);
+            }
+            exit;
+        }
+
+        // Handle Approve/Decline
+        if ($act === 'Approve') {
+            if ($l_id > 0) {
+                $l_status = $request->getPost('l_status');
+                $l_reply = $request->getPost('l_reply') ?? '';
+                $db->table('aa_leaves')->where('l_id', $l_id)->update([
+                    'l_status' => $l_status,
+                    'l_reply' => $l_reply,
+                    'l_approved_by' => $admin_session['u_name'],
+                    'l_approved_by_id' => $admin_session['u_id'],
+                ]);
+                echo json_encode(['status' => 'pass', 'message' => 'Leave ' . $l_status . 'd successfully.']);
+            }
+            exit;
+        }
+
+        // Handle loadinfo (for Approve modal)
+        if ($act === 'loadinfo') {
+            if ($l_id > 0) {
+                try {
+                    $leave = $db->table('aa_leaves L')
+                        ->select('L.*, U.u_name, U.u_mobile, U.u_email')
+                        ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
+                        ->where('L.l_id', $l_id)
+                        ->get()->getRowArray();
+                } catch (\Exception $e) {
+                    echo json_encode(['status' => 'fail', 'message' => 'Error loading leave info: ' . $e->getMessage()]);
+                    exit;
+                }
+
+                if ($leave) {
+                    // Count active projects
+                    try {
+                        $activeProjects = $db->table('aa_task2user')
+                            ->distinct()->select('tu_p_id')
+                            ->where('tu_u_id', $leave['l_u_id'])
+                            ->where('tu_removed', 'No')
+                            ->countAllResults();
+                    } catch (\Exception $e) {
+                        $activeProjects = 0;
+                    }
+
+                    // Count onhand tasks
+                    try {
+                        $onhandTasks = $db->table('aa_tasks T')
+                            ->join('aa_task2user TU', 'T.t_id = TU.tu_t_id', 'inner')
+                            ->where('TU.tu_u_id', $leave['l_u_id'])
+                            ->where('TU.tu_removed', 'No')
+                            ->whereNotIn('T.t_status', ['Completed', 'Cancelled'])
+                            ->countAllResults();
+                    } catch (\Exception $e) {
+                        $onhandTasks = 0;
+                    }
+
+                    $from = !empty($leave['l_from_date']) ? convert_db2display($leave['l_from_date'], false) : '';
+                    $to = !empty($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '';
+                    $dateStr = ($from === $to) ? $from : $from . ' to ' . $to;
+
+                    $msgHtml = '<b>Date:</b> ' . $dateStr . '<br/>';
+                    if (($leave['l_is_halfday'] ?? '') === 'Yes') {
+                        $msgHtml .= '<b>Half Day:</b> ' . ($leave['l_halfday_time'] ?? '') . '<br/>';
+                    }
+                    if (($leave['l_is_hourly'] ?? '') === 'Yes') {
+                        $msgHtml .= '<b>Hourly:</b> ' . ($leave['l_hourly_time'] ?? '') . ' (' . ($leave['l_hourly_time_hour'] ?? '') . ' hrs)<br/>';
+                    }
+                    $msgHtml .= ($leave['l_message'] ?? '');
+
+                    $imgUrl = '';
+
+                    echo json_encode([
+                        'status' => 'pass',
+                        'data' => [
+                            'l_id' => $leave['l_id'],
+                            'u_name' => $leave['u_name'] ?? '',
+                            'u_mobile' => $leave['u_mobile'] ?? '',
+                            'u_email' => $leave['u_email'] ?? '',
+                            'u_active' => $activeProjects,
+                            'u_tasks' => $onhandTasks,
+                            'l_message' => $msgHtml,
+                        ],
+                        'img_url' => $imgUrl,
+                    ]);
+                } else {
+                    echo json_encode(['status' => 'fail', 'message' => 'Leave not found.']);
+                }
+            }
+            exit;
+        }
+
+        // Handle single record fetch for edit
+        if ($act === 'list' && $l_id > 0) {
+            $leave = $db->table('aa_leaves')->where('l_id', $l_id)->get()->getRowArray();
+            if ($leave) {
+                $leave['l_from_date'] = !empty($leave['l_from_date']) ? convert_db2display($leave['l_from_date'], false) : '';
+                $leave['l_to_date'] = !empty($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '';
+                echo json_encode(['status' => 'pass', 'data' => $leave]);
+            } else {
+                echo json_encode(['status' => 'fail', 'message' => 'Leave not found.']);
+            }
+            exit;
+        }
+
+        // Handle DataTables list request
         $builder = $db->table('aa_leaves L');
         $builder->select('L.*, U.u_name as employee_name');
         $builder->join('aa_users U', 'L.l_u_id = U.u_id', 'left');
+
+        // Non-admin users only see their own leaves
+        if (!in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Super Admin', 'Bim Head', 'Project Leader'])) {
+            $builder->where('L.l_u_id', $admin_session['u_id']);
+        }
+
         $builder->orderBy('L.l_id', 'DESC');
         $leaves = $builder->get()->getResultArray();
 
@@ -1190,11 +1815,24 @@ class Api extends Controller
         foreach ($leaves as $leave) {
             $row = [];
             $row[] = $leave['employee_name'] ?? '';
-            $row[] = $leave['l_date'] ?? '';
-            $row[] = $leave['l_type'] ?? '';
-            $row[] = $leave['l_reason'] ?? '';
+            $row[] = isset($leave['l_create_date']) ? convert_db2display($leave['l_create_date'], false) : '';
+            $row[] = isset($leave['l_from_date']) ? convert_db2display($leave['l_from_date'], false) : '';
+            $row[] = isset($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '';
+            $row[] = $leave['l_message'] ?? '';
             $row[] = $leave['l_status'] ?? '';
-            $row[] = '<a href="javascript://" onclick="showAddEditForm(' . ($leave['l_id'] ?? 0) . ')" class="btn btn-primary btn-xs"><i class="fa fa-edit"></i></a>';
+            $row[] = ($leave['l_is_halfday'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_halfday_time'] ?? '') . ')' : 'No';
+            $row[] = ($leave['l_is_hourly'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_hourly_time'] ?? '') . ')' : 'No';
+
+            // Action buttons
+            $actions = '<div class="actions">';
+            if (in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Super Admin', 'Bim Head', 'Project Leader'])) {
+                $actions .= '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ')" class="btn btn-success btn-xs" title="Manage"><i class="fa fa-check"></i></a> ';
+            }
+            $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $leave['l_id'] . ')" class="btn btn-primary btn-xs"><i class="fa fa-edit"></i></a> ';
+            $actions .= '<a href="javascript://" onclick="deleteRecord(' . $leave['l_id'] . ')" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i></a>';
+            $actions .= '</div>';
+            $row[] = $actions;
+
             $data[] = $row;
         }
 
@@ -1365,11 +2003,22 @@ class Api extends Controller
                     if (in_array('ALL_PROJECT', $u_ids) && $pm_p_id) {
                         // Get all project members
                         $project = $db->table('aa_projects')->where('p_id', $pm_p_id)->get()->getRowArray();
+                        $u_ids = [];
                         if ($project) {
                             $leader_ids = !empty($project['p_leader']) ? explode(',', $project['p_leader']) : [];
-                            $employee_ids = !empty($project['p_employees']) ? explode(',', $project['p_employees']) : [];
-                            $u_ids = array_unique(array_merge($leader_ids, $employee_ids));
+                            $u_ids = array_merge($u_ids, $leader_ids);
                         }
+                        // Get users assigned to tasks in this project
+                        $projectUsers = $db->table('aa_task2user')
+                            ->distinct()
+                            ->select('tu_u_id')
+                            ->where('tu_p_id', $pm_p_id)
+                            ->where('tu_removed', 'No')
+                            ->get()->getResultArray();
+                        foreach ($projectUsers as $pu) {
+                            $u_ids[] = $pu['tu_u_id'];
+                        }
+                        $u_ids = array_unique(array_filter($u_ids));
                     }
                     foreach ($u_ids as $uid) {
                         if (!is_numeric($uid)) continue;
@@ -1873,18 +2522,43 @@ class Api extends Controller
         $admin_session = $session->get('admin_session');
         $db = \Config\Database::connect();
         $act = $request->getPost('act');
+        $u_id = $admin_session['u_id'] ?? '';
+        $u_type = $admin_session['u_type'] ?? '';
 
         switch ($act) {
             case 'list':
                 $draw = $request->getPost('draw') ?? 1;
                 $start = $request->getPost('start') ?? 0;
                 $length = $request->getPost('length') ?? 25;
+                $from_date = $request->getPost('from_date') ?? '';
+                $to_date = $request->getPost('to_date') ?? '';
+                $project_id = $request->getPost('project_id') ?? '';
+                $filter_status = $request->getPost('filter_status') ?? 'All';
 
                 $builder = $db->table('aa_weekly_work W');
-                $builder->select('W.*, P.p_name, U.u_name');
-                $builder->join('aa_projects P', 'W.ww_p_id = P.p_id', 'left');
-                $builder->join('aa_users U', 'W.ww_u_id = U.u_id', 'left');
-                $builder->orderBy('W.ww_id', 'DESC');
+                $builder->select('W.*, P.p_name, P.p_number, U.u_name as leader_name');
+                $builder->join('aa_projects P', 'W.p_id = P.p_id', 'left');
+                $builder->join('aa_users U', 'W.leader_id = U.u_id', 'left');
+
+                // Filter by user role
+                if (!in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
+                    $builder->where('W.leader_id', $u_id);
+                }
+
+                if (!empty($project_id)) {
+                    $builder->where('W.p_id', $project_id);
+                }
+                if (!empty($from_date)) {
+                    $builder->where('W.week_from >=', $from_date);
+                }
+                if (!empty($to_date)) {
+                    $builder->where('W.week_to <=', $to_date);
+                }
+                if (!empty($filter_status) && $filter_status !== 'All') {
+                    $builder->where('W.status', $filter_status);
+                }
+
+                $builder->orderBy('W.w_id', 'DESC');
 
                 $totalRecords = $builder->countAllResults(false);
                 if ($length != -1) {
@@ -1895,11 +2569,41 @@ class Api extends Controller
                 $data = [];
                 foreach ($records as $rec) {
                     $row = [];
-                    $row[] = $rec['p_name'] ?? '';
-                    $row[] = $rec['u_name'] ?? '';
-                    $row[] = $rec['ww_date'] ?? '';
-                    $row[] = $rec['ww_hours'] ?? '';
-                    $row[] = $rec['ww_description'] ?? '';
+                    // Week
+                    $row[] = ($rec['week_from'] ?? '') . ' to ' . ($rec['week_to'] ?? '');
+                    // Project
+                    $row[] = ($rec['p_number'] ?? '') . ' - ' . ($rec['p_name'] ?? '');
+                    // Task
+                    $row[] = $rec['task_name'] ?? '';
+                    // Submission Date
+                    $row[] = $rec['submission_date'] ?? '';
+                    // No. of Persons
+                    $row[] = $rec['no_of_persons'] ?? 0;
+                    // Assigned Employees
+                    $empNames = [];
+                    $assignedUsers = $db->table('aa_weekly_work_users WU')
+                        ->select('U.u_name')
+                        ->join('aa_users U', 'WU.u_id = U.u_id', 'left')
+                        ->where('WU.weekly_work_id', $rec['w_id'])
+                        ->get()->getResultArray();
+                    foreach ($assignedUsers as $au) {
+                        $empNames[] = $au['u_name'];
+                    }
+                    $row[] = implode(', ', $empNames);
+                    // Status
+                    $statusClass = 'label-default';
+                    if ($rec['status'] == 'WIP') $statusClass = 'label-warning';
+                    elseif ($rec['status'] == 'COMPLETED') $statusClass = 'label-success';
+                    elseif ($rec['status'] == 'HOLD') $statusClass = 'label-danger';
+                    elseif ($rec['status'] == 'PAUSE') $statusClass = 'label-info';
+                    $row[] = '<span class="label ' . $statusClass . '">' . ($rec['status'] ?? '') . '</span>';
+                    // Created By (for Bim Head / Master Admin)
+                    if (in_array($u_type, ['Bim Head', 'Master Admin'])) {
+                        $row[] = $rec['leader_name'] ?? '';
+                    }
+                    // Action
+                    $row[] = '<a href="javascript://" onclick="editWeeklyWork(' . $rec['w_id'] . ')" class="btn btn-primary btn-xs"><i class="fa fa-edit"></i></a> '
+                           . '<a href="javascript://" onclick="deleteWeeklyWork(' . $rec['w_id'] . ')" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i></a>';
                     $data[] = $row;
                 }
 
@@ -1909,6 +2613,206 @@ class Api extends Controller
                     'recordsFiltered' => $totalRecords,
                     'data' => $data
                 ]);
+                break;
+
+            case 'add':
+                $weeklyData = [
+                    'p_id' => $request->getPost('p_id'),
+                    'leader_id' => $u_id,
+                    'week_from' => $request->getPost('week_from'),
+                    'week_to' => $request->getPost('week_to'),
+                    'task_name' => $request->getPost('task_name'),
+                    'submission_date' => $request->getPost('submission_date') ?: null,
+                    'no_of_persons' => $request->getPost('no_of_persons') ?? 0,
+                    'status' => $request->getPost('status') ?? 'WIP',
+                    'dependency_type' => $request->getPost('dependency_type') ?? '',
+                    'dependency_text' => $request->getPost('dependency_text') ?? '',
+                    'dep_leader_ids' => is_array($request->getPost('dep_leader')) ? implode(',', $request->getPost('dep_leader')) : ($request->getPost('dep_leader') ?? ''),
+                    'dependency_date' => $request->getPost('dependency_date') ?: null,
+                    'created_at' => date('Y-m-d H:i:s'),
+                ];
+                $db->table('aa_weekly_work')->insert($weeklyData);
+                $w_id = $db->insertID();
+
+                // Save assigned employees
+                $employee_ids = $request->getPost('employee_ids') ?? [];
+                if (!empty($employee_ids)) {
+                    $weeklyData['no_of_persons'] = count($employee_ids);
+                    $db->table('aa_weekly_work')->where('w_id', $w_id)->update(['no_of_persons' => count($employee_ids)]);
+                    foreach ($employee_ids as $emp_id) {
+                        $db->table('aa_weekly_work_users')->insert([
+                            'weekly_work_id' => $w_id,
+                            'u_id' => $emp_id,
+                            'created_at' => date('Y-m-d H:i:s'),
+                        ]);
+                    }
+                }
+
+                // Save dependencies
+                $dep_texts = $request->getPost('dependency_text[]') ?? $request->getPost('dep_text') ?? [];
+                $dep_types = $request->getPost('dep_type') ?? [];
+                $dep_priorities = $request->getPost('dep_priority') ?? [];
+                $dep_statuses = $request->getPost('dep_status') ?? [];
+                $dep_target_dates = $request->getPost('dep_target_date') ?? [];
+                $dep_leaders = $request->getPost('dep_leader') ?? [];
+
+                if (is_array($dep_texts)) {
+                    foreach ($dep_texts as $i => $depText) {
+                        if (empty(trim($depText ?? ''))) continue;
+                        $db->table('aa_weekly_work_dependency')->insert([
+                            'weekly_work_id' => $w_id,
+                            'dependency_text' => $depText,
+                            'dependency_type' => $dep_types[$i] ?? '',
+                            'priority' => $dep_priorities[$i] ?? '',
+                            'status' => $dep_statuses[$i] ?? 'Pending',
+                            'target_date' => !empty($dep_target_dates[$i]) ? $dep_target_dates[$i] : null,
+                            'dep_leader_ids' => $dep_leaders[$i] ?? '',
+                            'created_at' => date('Y-m-d H:i:s'),
+                        ]);
+                    }
+                }
+
+                echo json_encode(['status' => 'pass', 'message' => 'Weekly work added successfully.']);
+                break;
+
+            case 'edit':
+                $w_id = $request->getPost('w_id');
+                $work = $db->table('aa_weekly_work')->where('w_id', $w_id)->get()->getRowArray();
+                if (!$work) {
+                    echo json_encode(['status' => 'fail', 'message' => 'Record not found.']);
+                    break;
+                }
+
+                // Get assigned employees
+                $assigned = $db->table('aa_weekly_work_users')
+                    ->select('u_id')
+                    ->where('weekly_work_id', $w_id)
+                    ->get()->getResultArray();
+                $assigned_employees = array_column($assigned, 'u_id');
+
+                // Get dependencies
+                $dependencies = $db->table('aa_weekly_work_dependency')
+                    ->where('weekly_work_id', $w_id)
+                    ->get()->getResultArray();
+
+                echo json_encode([
+                    'status' => 'pass',
+                    'data' => $work,
+                    'assigned_employees' => $assigned_employees,
+                    'dependencies' => $dependencies
+                ]);
+                break;
+
+            case 'update':
+                $w_id = $request->getPost('w_id');
+                if (!$w_id) {
+                    echo json_encode(['status' => 'fail', 'message' => 'Invalid record.']);
+                    break;
+                }
+
+                $updateData = [
+                    'p_id' => $request->getPost('p_id'),
+                    'week_from' => $request->getPost('week_from'),
+                    'week_to' => $request->getPost('week_to'),
+                    'task_name' => $request->getPost('task_name'),
+                    'submission_date' => $request->getPost('submission_date') ?: null,
+                    'no_of_persons' => $request->getPost('no_of_persons') ?? 0,
+                    'status' => $request->getPost('status') ?? 'WIP',
+                    'dependency_type' => $request->getPost('dependency_type') ?? '',
+                    'dependency_text' => $request->getPost('dependency_text_main') ?? '',
+                    'dep_leader_ids' => is_array($request->getPost('dep_leader_main')) ? implode(',', $request->getPost('dep_leader_main')) : ($request->getPost('dep_leader_main') ?? ''),
+                    'dependency_date' => $request->getPost('dependency_date') ?: null,
+                ];
+                $db->table('aa_weekly_work')->where('w_id', $w_id)->update($updateData);
+
+                // Update assigned employees
+                $db->table('aa_weekly_work_users')->where('weekly_work_id', $w_id)->delete();
+                $employee_ids = $request->getPost('employee_ids') ?? [];
+                if (!empty($employee_ids)) {
+                    $db->table('aa_weekly_work')->where('w_id', $w_id)->update(['no_of_persons' => count($employee_ids)]);
+                    foreach ($employee_ids as $emp_id) {
+                        $db->table('aa_weekly_work_users')->insert([
+                            'weekly_work_id' => $w_id,
+                            'u_id' => $emp_id,
+                            'created_at' => date('Y-m-d H:i:s'),
+                        ]);
+                    }
+                }
+
+                // Update dependencies
+                $dep_ids = $request->getPost('dep_id') ?? [];
+                $dep_texts = $request->getPost('dependency_text[]') ?? $request->getPost('dep_text') ?? [];
+                $dep_types = $request->getPost('dep_type') ?? [];
+                $dep_priorities = $request->getPost('dep_priority') ?? [];
+                $dep_statuses = $request->getPost('dep_status') ?? [];
+                $dep_target_dates = $request->getPost('dep_target_date') ?? [];
+                $dep_leaders = $request->getPost('dep_leader') ?? [];
+
+                // Remove old dependencies not in the update
+                $keep_ids = array_filter($dep_ids);
+                if (!empty($keep_ids)) {
+                    $db->table('aa_weekly_work_dependency')
+                        ->where('weekly_work_id', $w_id)
+                        ->whereNotIn('wd_id', $keep_ids)
+                        ->delete();
+                } else {
+                    $db->table('aa_weekly_work_dependency')->where('weekly_work_id', $w_id)->delete();
+                }
+
+                if (is_array($dep_texts)) {
+                    foreach ($dep_texts as $i => $depText) {
+                        if (empty(trim($depText ?? ''))) continue;
+                        $depData = [
+                            'weekly_work_id' => $w_id,
+                            'dependency_text' => $depText,
+                            'dependency_type' => $dep_types[$i] ?? '',
+                            'priority' => $dep_priorities[$i] ?? '',
+                            'status' => $dep_statuses[$i] ?? 'Pending',
+                            'target_date' => !empty($dep_target_dates[$i]) ? $dep_target_dates[$i] : null,
+                            'dep_leader_ids' => $dep_leaders[$i] ?? '',
+                        ];
+                        if (!empty($dep_ids[$i])) {
+                            $db->table('aa_weekly_work_dependency')->where('wd_id', $dep_ids[$i])->update($depData);
+                        } else {
+                            $depData['created_at'] = date('Y-m-d H:i:s');
+                            $db->table('aa_weekly_work_dependency')->insert($depData);
+                        }
+                    }
+                }
+
+                echo json_encode(['status' => 'pass', 'message' => 'Weekly work updated successfully.']);
+                break;
+
+            case 'delete':
+                $w_id = $request->getPost('w_id');
+                if ($w_id) {
+                    $db->table('aa_weekly_work_users')->where('weekly_work_id', $w_id)->delete();
+                    $db->table('aa_weekly_work_dependency')->where('weekly_work_id', $w_id)->delete();
+                    $db->table('aa_weekly_work')->where('w_id', $w_id)->delete();
+                    echo json_encode(['status' => 'pass', 'message' => 'Weekly work deleted successfully.']);
+                } else {
+                    echo json_encode(['status' => 'fail', 'message' => 'Invalid record.']);
+                }
+                break;
+
+            case 'dependencies':
+                $w_id = $request->getPost('w_id');
+                $type = $request->getPost('type') ?? 'all';
+
+                $builder = $db->table('aa_weekly_work_dependency WD');
+                $builder->select('WD.*, W.week_from, W.week_to, P.p_name as project_name, CU.u_name as created_by, AU.u_name as assigned_to');
+                $builder->join('aa_weekly_work W', 'WD.weekly_work_id = W.w_id', 'left');
+                $builder->join('aa_projects P', 'W.p_id = P.p_id', 'left');
+                $builder->join('aa_users CU', 'W.leader_id = CU.u_id', 'left');
+                $builder->join('aa_users AU', 'WD.dep_leader_ids = AU.u_id', 'left');
+                $builder->where('WD.weekly_work_id', $w_id);
+
+                if ($type === 'incomplete') {
+                    $builder->where('WD.status !=', 'Completed');
+                }
+
+                $deps = $builder->get()->getResultArray();
+                echo json_encode(['status' => 'pass', 'data' => $deps]);
                 break;
 
             default:
@@ -1931,12 +2835,12 @@ class Api extends Controller
 
         switch ($act) {
             case 'list':
-                $p_id = $request->getPost('p_id');
-                $id = $request->getPost('id');
+                $pc_p_id = $request->getPost('pc_p_id');
+                $pc_id = $request->getPost('pc_id');
 
-                if ($id) {
+                if ($pc_id > 0) {
                     $contact = $db->table('aa_project_contacts')
-                        ->where('pc_id', $id)
+                        ->where('pc_id', $pc_id)
                         ->get()->getRowArray();
                     echo json_encode(['status' => 'pass', 'data' => $contact ?? []]);
                     break;
@@ -1944,11 +2848,10 @@ class Api extends Controller
 
                 $draw = $request->getPost('draw') ?? 1;
                 $builder = $db->table('aa_project_contacts PC');
-                $builder->select('PC.*, P.p_name');
-                $builder->join('aa_projects P', 'PC.pc_p_id = P.p_id', 'left');
+                $builder->select('PC.*');
 
-                if (!empty($p_id)) {
-                    $builder->where('PC.pc_p_id', $p_id);
+                if (!empty($pc_p_id)) {
+                    $builder->where('PC.pc_p_id', $pc_p_id);
                 }
 
                 $builder->orderBy('PC.pc_id', 'DESC');
@@ -1957,11 +2860,10 @@ class Api extends Controller
                 $data = [];
                 foreach ($contacts as $c) {
                     $row = [];
-                    $row[] = $c['p_name'] ?? '';
                     $row[] = $c['pc_name'] ?? '';
+                    $row[] = $c['pc_designation'] ?? '';
                     $row[] = $c['pc_email'] ?? '';
                     $row[] = $c['pc_mobile'] ?? '';
-                    $row[] = $c['pc_designation'] ?? '';
                     $row[] = '<a href="javascript://" onclick="showAddEditForm(' . $c['pc_id'] . ')" class="btn btn-primary btn-xs"><i class="fa fa-edit"></i></a> '
                            . '<a href="javascript://" onclick="deleteRecord(' . $c['pc_id'] . ')" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i></a>';
                     $data[] = $row;
@@ -1993,7 +2895,7 @@ class Api extends Controller
                 break;
 
             case 'del':
-                $id = $request->getPost('id');
+                $id = $request->getPost('pc_id');
                 $db->table('aa_project_contacts')->where('pc_id', $id)->delete();
                 echo json_encode(['status' => 'pass', 'message' => 'Contact deleted.']);
                 break;
@@ -2017,11 +2919,11 @@ class Api extends Controller
         $admin_session = $session->get('admin_session');
         $db = \Config\Database::connect();
 
-        $type = $request->getPost('type');
+        $type = $request->getPost('type') ?? '';
         $draw = $request->getPost('draw') ?? 1;
-        $rpt_start = convert_display2db($request->getPost('rpt_start'));
-        $rpt_end = convert_display2db($request->getPost('rpt_end'));
-        $txt_search = $request->getPost('txt_search');
+        $rpt_start = convert_display2db($request->getPost('rpt_start') ?? '');
+        $rpt_end = convert_display2db($request->getPost('rpt_end') ?? '');
+        $txt_search = $request->getPost('txt_search') ?? '';
 
         switch ($type) {
             case 'attendence':

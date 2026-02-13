@@ -488,7 +488,7 @@
                     if (res.status == 'pass') {
                         showModal('ok', res.message, 'Success', 'modal-success', 'modal-sm', function() {},
                             function() {
-                                eval('dataTable' + p_id + '.ajax.reload();');
+                                dataTableTask.ajax.reload();
                             });
                     } else {
                         showModal('ok', res.message, 'Error', 'modal-danger', 'modal-sm');

@@ -133,7 +133,7 @@ abstract class BaseController extends Controller
                 // Check project method access
                 if (in_array($method, $this->project_methods)) {
                     $has_access = $this->authorization->is_project_leader_or_higher($this->admin_session) ||
-                                  ($this->authorization->is_role_allowed($this->admin_session['u_type'], ['Project Leader', 'TaskCoordinator']) && $method == 'index');
+                                  ($this->authorization->is_role_allowed($this->admin_session['u_type'] ?? '', ['Project Leader', 'TaskCoordinator']) && $method == 'index');
 
                     if (!$has_access) {
                         return redirect()->to(base_url('home/tasks'));

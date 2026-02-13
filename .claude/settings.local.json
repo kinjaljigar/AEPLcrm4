@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(php -r:*)",
+      "Bash(php:*)",
+      "Bash(del \"e:\\\\xampp\\\\htdocs\\\\AEPLcrm4\\\\check_cols.php\")"
+    ]
+  }
+}

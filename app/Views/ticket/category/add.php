@@ -35,7 +35,7 @@ $users = $view_data['data']['users'];
                         <select name="parent_id" class="form-control">
                             <option value="">None</option>
                             <?php foreach ($categories as $parent): ?>
-                                <option value="<?= $parent->id ?>"><?= htmlspecialchars($parent->name) ?></option>
+                                <option value="<?= $parent['id'] ?>"><?= htmlspecialchars($parent['name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>

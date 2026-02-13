@@ -10,6 +10,7 @@
                     <div class="col-md-12">
                         <h3 class="box-title">Subtask List</h3>
                         <a href="<?php echo base_url('home/tasks'); ?>" class="btn btn-primary pull-right" style="margin-left:10px;">Back</a>
+                        <a href="<?php echo base_url('home/task/add/' . $view_data['t_p_id'] . '/' . $view_data['t_id']); ?>" class="btn btn-primary pull-right">Add Sub Task</a>
                     </div>
                 </div>
             </div>

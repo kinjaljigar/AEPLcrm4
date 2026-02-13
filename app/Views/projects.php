@@ -25,6 +25,7 @@
                         Filter: <input class="form-control" name="txt_search" id="txt_search"
                             style="width:150px; display:inline" placeholder="Project No" />
                         <select class="form-control" id="txt_p_cat" name="txt_p_cat" style="width:auto; display:inline">
+                            <option value="">All Categories</option>
                             <?php
                             foreach ($view_data['p_cat'] as $val) {
                                 echo '<option value="' . $val . '">' . $val . '</option>';

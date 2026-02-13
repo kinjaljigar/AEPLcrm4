@@ -27,24 +27,24 @@ $assigned_users = $view_data['data']['assigned_users'];
                 </div>
                 <div class="box-body">
 
-                    <form method="post" action="<?= base_url('ticket-category/update/' . $category->id) ?>">
+                    <form method="post" action="<?= base_url('ticket-category/update/' . $category['id']) ?>">
                         <div class="form-group">
                             <label>Name</label>
-                            <input type="text" name="name" class="form-control" value="<?= $category->name ?>" required>
+                            <input type="text" name="name" class="form-control" value="<?= $category['name'] ?>" required>
                         </div>
                         <div class="form-group">
                             <label>Description</label>
-                            <textarea name="description" class="form-control"><?= $category->description ?></textarea>
+                            <textarea name="description" class="form-control"><?= $category['description'] ?></textarea>
                         </div>
                         <div class="form-group">
                             <label>Parent Category:</label>
                             <select name="parent_id" class="form-control">
                                 <option value="">None</option>
                                 <?php foreach ($categories as $parent): ?>
-                                    <?php if ($parent->id != $category->id): ?>
-                                        <option value="<?= $parent->id ?>"
-                                            <?php echo ($category->parent_id == $parent->id) ? 'selected' : ''; ?>>
-                                            <?= htmlspecialchars($parent->name) ?>
+                                    <?php if ($parent['id'] != $category['id']): ?>
+                                        <option value="<?= $parent['id'] ?>"
+                                            <?php echo ($category['parent_id'] == $parent['id']) ? 'selected' : ''; ?>>
+                                            <?= htmlspecialchars($parent['name']) ?>
                                         </option>
                                     <?php endif; ?>
                                 <?php endforeach; ?>
@@ -53,8 +53,8 @@ $assigned_users = $view_data['data']['assigned_users'];
                         <div class="form-group">
                             <label>Status</label>
                             <select name="status" class="form-control">
-                                <option value="Active" <?php echo ($category->status == 'Active') ? 'selected' : ' '; ?>>Active</option>
-                                <option value="Deactive" <?php echo ($category->status == 'Deactive') ? 'selected' : ''; ?>>Deactive</option>
+                                <option value="Active" <?php echo ($category['status'] == 'Active') ? 'selected' : ' '; ?>>Active</option>
+                                <option value="Deactive" <?php echo ($category['status'] == 'Deactive') ? 'selected' : ''; ?>>Deactive</option>
                             </select>
                         </div>
                         <div class="form-group">

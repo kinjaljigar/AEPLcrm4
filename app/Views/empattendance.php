@@ -177,7 +177,7 @@
 
     function showAddEditForm(id) {
         var PrevDay = new Date();
-        PrevDay.setDate(PrevDay.getDate() - <?php echo $view_data['at_days_back']; ?>);
+        PrevDay.setDate(PrevDay.getDate() - <?php echo $view_data['at_days_back'] ?? 7; ?>);
         var id = id == 'undefined' ? 0 : id;
         var html = '<form class="formclass" id="admin_add_form" name="admin_add_form" enctype="multipart/form-data">';
         html += $('.admin_add_modal').html();

@@ -1,0 +1,34 @@
+Modules --- 
+login - working well
+logout - working well
+Projects 
+Tasks -- - working well
+Messages  - -working well
+Leaves
+reports
+Holidays   - -is working well
+Timesheet
+Employees     --------- number of employees shown as different - working well
+settings --  is workng well
+ticket -- 
+
+
+
+Users as Masteradmin ,Bim head , Super admin
+
+
+
+
+User as Project Leader
+
+
+
+
+
+User as a coordinator
+
+
+
+
+
+User as mailcooridnator

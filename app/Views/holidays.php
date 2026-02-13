@@ -11,7 +11,7 @@
                         <h3 class="box-title">Holiday List</h3>
                     </div>
                     <div class="col-md-5">
-                    <?php if($view_data['admin_session']['u_type'] == 'Master Admin') { ?>
+                    <?php if(($view_data['admin_session']['u_type'] ?? '') == 'Master Admin') { ?>
                             <a onclick="return showAddEditForm()" href="javascript://" class="btn btn-primary pull-right">Add New Holiday</a>
                     <?php } ?>
                     </div>
