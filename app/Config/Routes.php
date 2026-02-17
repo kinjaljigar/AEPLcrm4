@@ -125,7 +125,14 @@ $routes->post('companyuser/update/(:num)', 'CompanyUser::update/$1');
 $routes->get('companyuser/delete/(:num)', 'CompanyUser::delete/$1');
 
 $routes->get('usertask', 'UserTask::index');
+$routes->get('usertask/add', 'UserTask::add');
+$routes->post('usertask/addData', 'UserTask::addData');
 $routes->get('usertask/view/(:num)', 'UserTask::view/$1');
+$routes->get('usertask/edit/(:num)', 'UserTask::edit/$1');
+$routes->post('usertask/update/(:num)', 'UserTask::update/$1');
+$routes->get('usertask/delete/(:num)', 'UserTask::delete/$1');
+$routes->post('usertask/fetchTasks', 'UserTask::fetchTasks');
+$routes->match(['get', 'post'], 'usertask/status/(:num)', 'UserTask::status/$1');
 
 // Ticket routes
 $routes->get('ticket-category', 'Ticket::category');
@@ -146,6 +153,10 @@ $routes->get('ticket/my', 'Ticket::my');
 $routes->post('ticket/my', 'Ticket::my');
 $routes->get('ticket/assigned', 'Ticket::assigned');
 $routes->post('ticket/assigned', 'Ticket::assigned');
+$routes->post('ticket/add_message/(:num)', 'Ticket::add_message/$1');
+$routes->get('ticket/close/(:num)', 'Ticket::close/$1');
+$routes->get('ticket/delete/(:num)', 'Ticket::delete/$1');
+$routes->get('ticket/deleteassign/(:num)', 'Ticket::deleteassign/$1');
 
 // POST routes for other modules
 $routes->post('conference', 'Conference::index');

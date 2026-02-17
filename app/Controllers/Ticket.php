@@ -100,6 +100,30 @@ class Ticket extends BaseController
             }
         }
 
+        // Desktop notification: notify assigned users for this ticket's category
+        $assigned_users = $db->table('aa_ticket_category_users acu')
+            ->select('u.u_id')
+            ->join('aa_users u', 'acu.u_id = u.u_id')
+            ->where('acu.category_id', $ticket_data['category_id'])
+            ->get()->getResultArray();
+
+        if (!empty($assigned_users)) {
+            $notifTitle = "New Ticket Created";
+            $notifMessage = "Ticket: " . $ticket_data['subject'] . " created by " . $this->admin_session['u_name'];
+            $notifPayload = json_encode(['screen_name' => 'Ticket', 'action' => 'ticket_created', 'id' => $ticket_id]);
+
+            $batchData = [];
+            foreach ($assigned_users as $au) {
+                $batchData[] = [
+                    'u_id' => $au['u_id'], 'title' => $notifTitle, 'message' => $notifMessage,
+                    'payload' => $notifPayload, 'is_sent' => 0,
+                ];
+            }
+            if (!empty($batchData)) {
+                $db->table('aa_desktop_notification_queue')->insertBatch($batchData);
+            }
+        }
+
         return redirect()->to('ticket/my');
     }
 
@@ -176,6 +200,40 @@ class Ticket extends BaseController
                 'message' => $message,
                 'created_at' => date('Y-m-d H:i:s'),
             ]);
+            $message_id = $db->insertID();
+
+            // Desktop notification for ticket message
+            $ticket = $db->table('aa_tickets')->where('id', $ticket_id)->get()->getRow();
+            if ($ticket) {
+                $current_user_id = $this->admin_session['u_id'];
+                $creator_id = $ticket->u_id;
+
+                // Get assigned users for this category
+                $assigned_user_ids = array_column(
+                    $db->table('aa_ticket_category_users')->select('u_id')->where('category_id', $ticket->category_id)->get()->getResultArray(),
+                    'u_id'
+                );
+
+                $notify_user_ids = [];
+                if ($current_user_id == $creator_id) {
+                    $notify_user_ids = $assigned_user_ids;
+                } elseif (in_array($current_user_id, $assigned_user_ids)) {
+                    $notify_user_ids = array_diff($assigned_user_ids, [$current_user_id]);
+                    $notify_user_ids[] = $creator_id;
+                }
+
+                $notify_user_ids = array_unique(array_filter($notify_user_ids));
+                $notifTitle = "New Message in Ticket - " . $ticket->ticket_number;
+                $notifMessage = "Message sent by: " . $this->admin_session['u_name'];
+                $notifPayload = json_encode(['screen_name' => 'Ticket', 'action' => 'message sent by:' . $this->admin_session['u_name'], 'id' => $ticket_id, 'message_id' => $message_id]);
+
+                foreach ($notify_user_ids as $nuid) {
+                    $db->table('aa_desktop_notification_queue')->insert([
+                        'u_id' => $nuid, 'title' => $notifTitle, 'message' => $notifMessage,
+                        'payload' => $notifPayload, 'is_sent' => 0,
+                    ]);
+                }
+            }
         }
 
         return redirect()->to('ticket/view/' . $ticket_id . (!empty($from) ? '?from=' . $from : ''));
@@ -186,8 +244,56 @@ class Ticket extends BaseController
         $db = \Config\Database::connect();
         $from = service('request')->getGet('from');
 
+        // Verify ticket exists
+        $ticket = $db->table('aa_tickets')->where('id', $id)->get()->getRow();
+        if (!$ticket) {
+            session()->setFlashdata('error', 'Ticket not found.');
+            return redirect()->to('ticket/my');
+        }
+
+        // Only assigned users for this ticket's category can close it
+        $logged_user_id = $this->admin_session['u_id'];
+        $is_assigned_user = $db->table('aa_ticket_category_users')
+            ->where('category_id', $ticket->category_id)
+            ->where('u_id', $logged_user_id)
+            ->countAllResults() > 0;
+
+        if (!$is_assigned_user) {
+            session()->setFlashdata('error', 'You are not authorized to close this ticket.');
+            return redirect()->to('ticket/view/' . $id . (!empty($from) ? '?from=' . $from : ''));
+        }
+
         $db->table('aa_tickets')->where('id', $id)->update(['status' => 'closed']);
         session()->setFlashdata('success', 'Ticket closed successfully.');
+
+        // Desktop notification for ticket closure
+        $logged_user_id = $this->admin_session['u_id'];
+        $creator_id = $ticket->u_id;
+
+        $assigned_user_ids = array_column(
+            $db->table('aa_ticket_category_users')->select('u_id')->where('category_id', $ticket->category_id)->get()->getResultArray(),
+            'u_id'
+        );
+
+        $notify_user_ids = [];
+        if ($logged_user_id == $creator_id) {
+            $notify_user_ids = $assigned_user_ids;
+        } elseif (in_array($logged_user_id, $assigned_user_ids)) {
+            $notify_user_ids = array_diff($assigned_user_ids, [$logged_user_id]);
+            $notify_user_ids[] = $creator_id;
+        }
+
+        $notify_user_ids = array_unique(array_filter($notify_user_ids));
+        $notifTitle = "Ticket Closed - " . $ticket->ticket_number;
+        $notifMessage = "Ticket is Closed By: " . $this->admin_session['u_name'];
+        $notifPayload = json_encode(['screen_name' => 'Ticket', 'action' => 'Ticket is Closed By:' . $this->admin_session['u_name'], 'id' => $id]);
+
+        foreach ($notify_user_ids as $nuid) {
+            $db->table('aa_desktop_notification_queue')->insert([
+                'u_id' => $nuid, 'title' => $notifTitle, 'message' => $notifMessage,
+                'payload' => $notifPayload, 'is_sent' => 0,
+            ]);
+        }
 
         return redirect()->to('ticket/view/' . $id . (!empty($from) ? '?from=' . $from : ''));
     }

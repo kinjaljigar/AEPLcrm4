@@ -44,6 +44,20 @@ class Api extends BaseController
 
                     $session->set('admin_session', $admin_session);
 
+                    // Record attendance in aa_present
+                    $db = \Config\Database::connect();
+                    $today = date('Y-m-d');
+                    $existing = $db->table('aa_present')
+                        ->where('pr_u_id', $user['u_id'])
+                        ->where('pr_date', $today)
+                        ->countAllResults();
+                    if ($existing == 0) {
+                        $db->table('aa_present')->insert([
+                            'pr_u_id' => $user['u_id'],
+                            'pr_date' => $today
+                        ]);
+                    }
+
                     // Generate token
                     $token = bin2hex(random_bytes(32));
                     $session->set('token', $token);
@@ -95,24 +109,24 @@ class Api extends BaseController
             case 'basic':
                 // Get project counts
                 $pBuilder = $db->table('aa_projects');
-                if ($isLeader) $pBuilder->like('p_leader', $u_id);
+                if ($isLeader) $pBuilder->where("FIND_IN_SET($u_id, p_leader)", null, false);
                 $total_projects = $pBuilder->countAllResults();
 
                 $pBuilder = $db->table('aa_projects')->where('p_status', 'Active');
-                if ($isLeader) $pBuilder->like('p_leader', $u_id);
+                if ($isLeader) $pBuilder->where("FIND_IN_SET($u_id, p_leader)", null, false);
                 $active_projects = $pBuilder->countAllResults();
 
                 $pBuilder = $db->table('aa_projects')->where('p_status', 'Completed');
-                if ($isLeader) $pBuilder->like('p_leader', $u_id);
+                if ($isLeader) $pBuilder->where("FIND_IN_SET($u_id, p_leader)", null, false);
                 $completed_projects = $pBuilder->countAllResults();
 
                 $pBuilder = $db->table('aa_projects')->where('p_status', 'Hold');
-                if ($isLeader) $pBuilder->like('p_leader', $u_id);
+                if ($isLeader) $pBuilder->where("FIND_IN_SET($u_id, p_leader)", null, false);
                 $hold_projects = $pBuilder->countAllResults();
 
                 // Get task counts
                 if ($isLeader) {
-                    $leaderProjects = $db->table('aa_projects')->select('p_id')->like('p_leader', $u_id)->get()->getResultArray();
+                    $leaderProjects = $db->table('aa_projects')->select('p_id')->where("FIND_IN_SET($u_id, p_leader)", null, false)->get()->getResultArray();
                     $projectIds = array_column($leaderProjects, 'p_id');
                     if (!empty($projectIds)) {
                         $total_tasks = $db->table('aa_tasks')->whereIn('t_p_id', $projectIds)->countAllResults();
@@ -130,23 +144,40 @@ class Api extends BaseController
                 }
 
                 // Get employee counts
-                $total_employee = $db->table('aa_users')->where('u_type !=', 'Associate User')->countAllResults();
-                $active_employees = $db->table('aa_users')->where('u_type !=', 'Associate User')->where('u_status', 'Active')->countAllResults();
+                $today = date('Y-m-d');
+                if ($isLeader) {
+                    // Project Leader: only employees under this leader
+                    $total_employee = $db->table('aa_users')->where('u_leader', $u_id)->countAllResults();
 
-                // Department-wise employee counts
-                $departments = $db->table('aa_users')
-                    ->select('u_department, COUNT(*) as cnt')
-                    ->where('u_status', 'Active')
-                    ->where('u_type !=', 'Associate User')
-                    ->groupBy('u_department')
-                    ->get()->getResultArray();
+                    // Active employees (present today) under this leader, grouped by department
+                    $deptQuery = $db->query("SELECT COUNT(u_id) as total, u_department FROM aa_users JOIN aa_present ON u_id = pr_u_id WHERE pr_date = " . $db->escape($today) . " AND u_leader = " . $db->escape($u_id) . " GROUP BY u_department")->getResultArray();
+                } else {
+                    // Other roles: all users minus 2 (system accounts)
+                    $allCount = $db->table('aa_users')->countAllResults();
+                    $total_employee = ($allCount - 2);
 
-                // Build department rows HTML
-                $deptHtml = '<thead><tr><th>Department</th><th>Count</th></tr></thead><tbody>';
-                foreach ($departments as $dept) {
-                    $deptHtml .= '<tr><td>' . htmlspecialchars($dept['u_department'] ?? 'N/A') . '</td><td>' . $dept['cnt'] . '</td></tr>';
+                    // Active employees (present today) grouped by department
+                    $deptQuery = $db->query("SELECT COUNT(u_id) as total, u_department FROM aa_users JOIN aa_present ON u_id = pr_u_id WHERE pr_date = " . $db->escape($today) . " GROUP BY u_department")->getResultArray();
                 }
-                $deptHtml .= '</tbody>';
+
+                // Build department presence counts
+                $presents = ['Architecture' => 0, 'MEPF' => 0, 'Admin' => 0];
+                $active_employees = 0;
+                foreach ($deptQuery as $val) {
+                    $presents[$val['u_department'] ?? 'Other'] = $val['total'];
+                    $active_employees += $val['total'];
+                }
+
+                // Build department rows HTML (horizontal format like CI3)
+                $r1 = '<thead><tr>';
+                $r2 = '<tbody><tr>';
+                foreach ($presents as $key => $val) {
+                    $r1 .= '<th>' . htmlspecialchars($key) . '</th>';
+                    $r2 .= '<td>' . $val . '</td>';
+                }
+                $r1 .= '</tr></thead>';
+                $r2 .= '</tr></tbody>';
+                $deptHtml = $r1 . $r2;
 
                 echo json_encode([
                     'status' => 'pass',
@@ -254,27 +285,45 @@ class Api extends BaseController
                 ]);
                 exit;
 
-            case 'present_list_limit':
-                // Get all active employees who are NOT on leave today
+            case 'present_list':
+                // Show employees who logged in today (from aa_present table)
                 $today = date('Y-m-d');
-                $onLeaveIds = $db->table('aa_leaves')
-                    ->select('l_u_id')
-                    ->where('l_status', 'Approve')
-                    ->where('l_from_date <=', $today)
-                    ->where('l_to_date >=', $today)
-                    ->get()->getResultArray();
-                $leaveUserIds = array_column($onLeaveIds, 'l_u_id');
+                $builder = $db->table('aa_users U')
+                    ->select('U.u_name, U.u_email, U.u_mobile, U.u_type, U.u_department')
+                    ->join('aa_present P', 'U.u_id = P.pr_u_id')
+                    ->where('P.pr_date', $today)
+                    ->orderBy('U.u_department', 'ASC')
+                    ->orderBy('U.u_name', 'ASC');
 
-                $builder = $db->table('aa_users')
-                    ->select('u_name, u_email, u_mobile, u_type, u_department')
-                    ->where('u_status', 'Active')
-                    ->where('u_type !=', 'Associate User')
-                    ->orderBy('u_department', 'ASC')
-                    ->orderBy('u_name', 'ASC');
-
-                if (!empty($leaveUserIds)) {
-                    $builder->whereNotIn('u_id', $leaveUserIds);
+                $employees = $builder->get()->getResultArray();
+                $data = [];
+                foreach ($employees as $emp) {
+                    $data[] = [
+                        $emp['u_name'],
+                        $emp['u_email'] ?? '',
+                        $emp['u_mobile'] ?? '',
+                        $emp['u_type'],
+                        $emp['u_department'] ?? ''
+                    ];
                 }
+
+                echo json_encode([
+                    'draw' => $request->getPost('draw') ?? 1,
+                    'recordsTotal' => count($data),
+                    'recordsFiltered' => count($data),
+                    'data' => $data
+                ]);
+                exit;
+
+            case 'present_list_limit':
+                // Show employees who logged in today (from aa_present table) - limited for dashboard
+                $today = date('Y-m-d');
+                $builder = $db->table('aa_users U')
+                    ->select('U.u_name, U.u_email, U.u_mobile, U.u_type, U.u_department')
+                    ->join('aa_present P', 'U.u_id = P.pr_u_id')
+                    ->where('P.pr_date', $today)
+                    ->orderBy('U.u_department', 'ASC')
+                    ->orderBy('U.u_name', 'ASC');
 
                 $employees = $builder->get()->getResultArray();
                 $data = [];
@@ -346,7 +395,53 @@ class Api extends BaseController
 
         header('Content-Type: application/json');
 
-        echo json_encode([]);
+        $session = service('session');
+        $admin_session = $session->get('admin_session');
+        $u_id = $admin_session['u_id'] ?? 0;
+
+        if (!$u_id) {
+            echo json_encode([]);
+            exit;
+        }
+
+        try {
+            $db = \Config\Database::connect();
+
+            // Fetch unsent notifications for this user
+            $notifications = $db->table('aa_desktop_notification_queue')
+                ->where('u_id', $u_id)
+                ->where('is_sent', 0)
+                ->orderBy('id', 'DESC')
+                ->get()->getResultArray();
+
+            if (!empty($notifications)) {
+                // Delete fetched notifications
+                $ids = array_column($notifications, 'id');
+                $db->table('aa_desktop_notification_queue')
+                    ->whereIn('id', $ids)
+                    ->delete();
+            }
+
+            // Garbage collection: keep only last 10 sent notifications per user
+            $sentNotifications = $db->table('aa_desktop_notification_queue')
+                ->where('u_id', $u_id)
+                ->where('is_sent', 1)
+                ->orderBy('id', 'DESC')
+                ->get()->getResultArray();
+            $latest10Ids = array_column(array_slice($sentNotifications, 0, 10), 'id');
+            if (!empty($latest10Ids)) {
+                $db->table('aa_desktop_notification_queue')
+                    ->where('u_id', $u_id)
+                    ->where('is_sent', 1)
+                    ->whereNotIn('id', $latest10Ids)
+                    ->delete();
+            }
+
+            echo json_encode($notifications);
+        } catch (\Exception $e) {
+            log_message('error', 'Exception in fetchDesktopNotifications: ' . $e->getMessage());
+            echo json_encode([]);
+        }
         exit;
     }
 
@@ -743,6 +838,11 @@ class Api extends BaseController
                     $builder->where('T.t_parent', 0);
                 }
                 $builder->where('P.p_status', 'Active');
+
+                // Project Leader / Employee: only show tasks assigned to them
+                if (in_array($admin_session['u_type'], ['Project Leader', 'Employee'])) {
+                    $builder->where('TU.tu_u_id', $admin_session['u_id']);
+                }
 
                 if (!empty($txt_projects)) {
                     $builder->like('P.p_name', $txt_projects);
@@ -1434,7 +1534,8 @@ class Api extends BaseController
 
                         $html = '<option value="">Select Project</option>';
                         foreach ($projects as $project) {
-                            $html .= '<option value="' . $project['p_id'] . '">' . htmlspecialchars($project['p_name']) . '</option>';
+                            $display = !empty($project['p_number']) ? $project['p_number'] . ' - ' . $project['p_name'] : $project['p_name'];
+                            $html .= '<option value="' . $project['p_id'] . '">' . htmlspecialchars($display) . '</option>';
                         }
                         $response['data']['Leaderassignprojects'] = $html;
                         break;
@@ -1452,11 +1553,19 @@ class Api extends BaseController
                             $builder->where('p_status', 'Active');
                             $builder->orderBy('p_name', 'ASC');
                             $projects = $builder->get()->getResultArray();
+                        } elseif ($u_type === 'Project Leader') {
+                            // Project Leader: only projects where they are p_leader
+                            $projects = $db->table('aa_projects')
+                                ->select('p_id, p_name, p_number')
+                                ->where('p_status', 'Active')
+                                ->like('p_leader', $u_id)
+                                ->orderBy('p_name', 'ASC')
+                                ->get()->getResultArray();
                         } else {
-                            // Get projects where user is leader or assigned to tasks
+                            // Other users: projects where assigned to tasks
                             $projects = $db->query("SELECT DISTINCT P.p_id, P.p_name, P.p_number FROM aa_projects P
                                 LEFT JOIN aa_task2user TU ON P.p_id = TU.tu_p_id AND TU.tu_removed = 'No'
-                                WHERE P.p_status = 'Active' AND (P.p_leader LIKE '%{$u_id}%' OR TU.tu_u_id = '{$u_id}')
+                                WHERE P.p_status = 'Active' AND TU.tu_u_id = '{$u_id}'
                                 ORDER BY P.p_name ASC")->getResultArray();
                         }
 
@@ -1518,15 +1627,49 @@ class Api extends BaseController
                         $response['data']['emptasks'] = $html;
                         break;
 
+                    case 'tasks':
+                        // Get tasks assigned to the logged-in user within a project (for timesheet)
+                        $session = service('session');
+                        $admin_session = $session->get('admin_session');
+                        $ts_u_id = $admin_session['u_id'];
+                        $p_id = $obj['p_id'] ?? '';
+                        $records = $db->table('aa_tasks T')
+                            ->select('T.t_id, T.t_title')
+                            ->join('aa_task2user TU', 'TU.tu_t_id = T.t_id')
+                            ->where('T.t_p_id', $p_id)
+                            ->where('T.t_parent', 0)
+                            ->where('TU.tu_u_id', $ts_u_id)
+                            ->where('TU.tu_removed', 'No')
+                            ->where('T.t_status !=', 'Completed')
+                            ->get()->getResultArray();
+
+                        $html = isset($obj['title']) && $obj['title'] ? '<option value="">' . $obj['title'] . '</option>' : '<option value="">Select Task</option>';
+                        if ($records) {
+                            foreach ($records as $row) {
+                                $selected = (isset($obj['id']) && $obj['id'] == $row['t_id']) ? ' selected="selected"' : '';
+                                $html .= '<option value="' . $row['t_id'] . '"' . $selected . '>' . htmlspecialchars($row['t_title']) . '</option>';
+                                // Add subtasks
+                                $subtasks = $db->table('aa_tasks')->select('t_id, t_title')->where('t_parent', $row['t_id'])->get()->getResultArray();
+                                if ($subtasks) {
+                                    foreach ($subtasks as $sub) {
+                                        $selected2 = (isset($obj['id']) && $obj['id'] == $sub['t_id']) ? ' selected="selected"' : '';
+                                        $html .= '<option value="' . $sub['t_id'] . '"' . $selected2 . '>&nbsp;&nbsp;&nbsp;' . htmlspecialchars($sub['t_title']) . '</option>';
+                                    }
+                                }
+                            }
+                        }
+                        $response['data']['tasks'] = $html;
+                        break;
+
                     case 'timesheetprojects':
-                        // Projects for timesheet - only those with active tasks assigned
+                        // Projects for timesheet - only those with non-completed tasks assigned
                         $session = service('session');
                         $admin_session = $session->get('admin_session');
                         $ts_u_id = $obj['u_id'] ?? $admin_session['u_id'];
                         if (in_array($admin_session['u_type'], ['Master Admin', 'Super Admin', 'Bim Head', 'MailCoordinator', 'TaskCoordinator'])) {
                             $records = $db->table('aa_projects')->select('p_id, p_name, p_number')->where('p_status', 'Active')->orderBy('p_name', 'ASC')->get()->getResultArray();
                         } else {
-                            $records = $db->query("SELECT DISTINCT(p_id), P.p_name, P.p_number, u_id FROM aa_users U LEFT OUTER JOIN aa_task2user TU ON U.u_id = TU.tu_u_id LEFT OUTER JOIN aa_projects P ON TU.tu_p_id = P.p_id WHERE TU.tu_removed = 'No' AND (P.p_status = 'Active' OR P.p_status = 'New') AND u_id = '{$ts_u_id}'")->getResultArray();
+                            $records = $db->query("SELECT DISTINCT P.p_id, P.p_name, P.p_number, U.u_id FROM aa_users U LEFT OUTER JOIN aa_task2user TU ON U.u_id = TU.tu_u_id LEFT OUTER JOIN aa_tasks T ON T.t_id = TU.tu_t_id LEFT OUTER JOIN aa_projects P ON TU.tu_p_id = P.p_id WHERE TU.tu_removed = 'No' AND P.p_status IN ('Active', 'New') AND T.t_status != 'Completed' AND U.u_id = " . $db->escape($ts_u_id) . " ORDER BY P.p_name")->getResultArray();
                         }
                         $html = isset($obj['title']) && $obj['title'] ? '<option value="-1">' . $obj['title'] . '</option>' : '<option value="-1">Select Project</option>';
                         if ($records) {
@@ -1543,22 +1686,36 @@ class Api extends BaseController
                         break;
 
                     case 'project_leaders':
-                        // Get leaders of a specific project
+                        // Get leaders of a specific project + Master Admin, Bim Head, TaskCoordinator
                         $p_id = $obj['p_id'] ?? '';
                         if ($p_id) {
                             $project = $db->table('aa_projects')->select('p_leader')->where('p_id', $p_id)->get()->getRowArray();
-                            $html = '<option value="">Select Leader</option>';
+                            $leaderIds = [];
                             if ($project && !empty($project['p_leader'])) {
                                 $leaderIds = array_filter(explode(',', $project['p_leader']));
-                                if (!empty($leaderIds)) {
-                                    $leaders = $db->table('aa_users')
-                                        ->select('u_id, u_name')
-                                        ->whereIn('u_id', $leaderIds)
-                                        ->orderBy('u_name', 'ASC')
-                                        ->get()->getResultArray();
-                                    foreach ($leaders as $leader) {
-                                        $html .= '<option value="' . $leader['u_id'] . '">' . htmlspecialchars($leader['u_name']) . '</option>';
-                                    }
+                            }
+
+                            // Also get Master Admin, Bim Head, TaskCoordinator users
+                            $adminUsers = $db->table('aa_users')
+                                ->select('u_id')
+                                ->where('u_status', 'Active')
+                                ->whereIn('u_type', ['Master Admin', 'Bim Head', 'TaskCoordinator'])
+                                ->get()->getResultArray();
+                            foreach ($adminUsers as $au) {
+                                $leaderIds[] = $au['u_id'];
+                            }
+                            $leaderIds = array_unique(array_filter($leaderIds));
+
+                            $html = '<option value="">Select Leader</option>';
+                            if (!empty($leaderIds)) {
+                                $leaders = $db->table('aa_users')
+                                    ->select('u_id, u_name, u_type')
+                                    ->whereIn('u_id', $leaderIds)
+                                    ->where('u_status', 'Active')
+                                    ->orderBy('u_name', 'ASC')
+                                    ->get()->getResultArray();
+                                foreach ($leaders as $leader) {
+                                    $html .= '<option value="' . $leader['u_id'] . '">' . htmlspecialchars($leader['u_name'] . ' (' . $leader['u_type'] . ')') . '</option>';
                                 }
                             }
                             $response['data']['project_leaders'] = $html;
@@ -1672,6 +1829,11 @@ class Api extends BaseController
 
             try {
                 if ($l_id > 0) {
+                    // Reset status to Pending so it goes back for approval
+                    $leaveData['l_status'] = 'Pending';
+                    $leaveData['l_approved_by'] = '';
+                    $leaveData['l_approved_by_id'] = '';
+                    $leaveData['l_reply'] = '';
                     $db->table('aa_leaves')->where('l_id', $l_id)->update($leaveData);
                 } else {
                     $leaveData['l_create_date'] = date('Y-m-d');
@@ -1688,8 +1850,22 @@ class Api extends BaseController
         // Handle Delete
         if ($act === 'del') {
             if ($l_id > 0) {
-                $db->table('aa_leaves')->where('l_id', $l_id)->delete();
-                echo json_encode(['status' => 'pass', 'message' => 'Leave deleted successfully.']);
+                $leave = $db->table('aa_leaves')->where('l_id', $l_id)->get()->getRowArray();
+                if (!$leave) {
+                    echo json_encode(['status' => 'fail', 'message' => 'Leave not found.']);
+                    exit;
+                }
+
+                $isMasterAdmin = (($admin_session['u_type'] ?? '') === 'Master Admin');
+                $isOwnLeave = ($leave['l_u_id'] == $admin_session['u_id']);
+
+                // Master Admin can delete any leave; creator can delete only if Pending
+                if ($isMasterAdmin || ($isOwnLeave && ($leave['l_status'] ?? '') === 'Pending')) {
+                    $db->table('aa_leaves')->where('l_id', $l_id)->delete();
+                    echo json_encode(['status' => 'pass', 'message' => 'Leave deleted successfully.']);
+                } else {
+                    echo json_encode(['status' => 'fail', 'message' => 'You are not authorized to delete this leave.']);
+                }
             } else {
                 echo json_encode(['status' => 'fail', 'message' => 'Invalid leave record.']);
             }
@@ -1699,6 +1875,19 @@ class Api extends BaseController
         // Handle Approve/Decline
         if ($act === 'Approve') {
             if ($l_id > 0) {
+                // Project Leader can only approve leaves of their assigned employees
+                if (($admin_session['u_type'] ?? '') === 'Project Leader') {
+                    $leaveUser = $db->table('aa_leaves L')
+                        ->select('U.u_leader')
+                        ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
+                        ->where('L.l_id', $l_id)
+                        ->get()->getRowArray();
+                    if (!$leaveUser || ($leaveUser['u_leader'] ?? '') != $admin_session['u_id']) {
+                        echo json_encode(['status' => 'fail', 'message' => 'You are not authorized to approve this leave.']);
+                        exit;
+                    }
+                }
+
                 $l_status = $request->getPost('l_status');
                 $l_reply = $request->getPost('l_reply') ?? '';
                 $db->table('aa_leaves')->where('l_id', $l_id)->update([
@@ -1800,11 +1989,17 @@ class Api extends BaseController
 
         // Handle DataTables list request
         $builder = $db->table('aa_leaves L');
-        $builder->select('L.*, U.u_name as employee_name');
+        $builder->select('L.*, U.u_name as employee_name, U.u_leader');
         $builder->join('aa_users U', 'L.l_u_id = U.u_id', 'left');
 
         // Non-admin users only see their own leaves
-        if (!in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Super Admin', 'Bim Head', 'Project Leader'])) {
+        if (($admin_session['u_type'] ?? '') === 'Project Leader') {
+            // Project Leader sees own leaves + leaves of employees assigned to them (u_leader)
+            $builder->groupStart()
+                ->where('L.l_u_id', $admin_session['u_id'])
+                ->orWhere('U.u_leader', $admin_session['u_id'])
+            ->groupEnd();
+        } elseif (!in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Super Admin', 'Bim Head'])) {
             $builder->where('L.l_u_id', $admin_session['u_id']);
         }
 
@@ -1825,11 +2020,32 @@ class Api extends BaseController
 
             // Action buttons
             $actions = '<div class="actions">';
-            if (in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Super Admin', 'Bim Head', 'Project Leader'])) {
-                $actions .= '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ')" class="btn btn-success btn-xs" title="Manage"><i class="fa fa-check"></i></a> ';
+            $isCreator = ($leave['l_u_id'] == $admin_session['u_id']);
+            $isPending = (($leave['l_status'] ?? '') === 'Pending');
+            $isAdmin = in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Super Admin', 'Bim Head']);
+            $isLeader = (($admin_session['u_type'] ?? '') === 'Project Leader');
+
+            // Creator can edit and delete (delete only if still Pending)
+            if ($isCreator) {
+                $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $leave['l_id'] . ')" class="btn btn-primary btn-xs" title="Edit"><i class="fa fa-edit"></i></a> ';
+                if ($isPending) {
+                    $actions .= '<a href="javascript://" onclick="deleteRecord(' . $leave['l_id'] . ')" class="btn btn-danger btn-xs" title="Delete"><i class="fa fa-trash"></i></a> ';
+                }
             }
-            $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $leave['l_id'] . ')" class="btn btn-primary btn-xs"><i class="fa fa-edit"></i></a> ';
-            $actions .= '<a href="javascript://" onclick="deleteRecord(' . $leave['l_id'] . ')" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i></a>';
+
+            // Approve/Decline only when Pending
+            if ($isPending) {
+                if ($isAdmin) {
+                    $actions .= '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ')" class="btn btn-success btn-xs" title="Manage"><i class="fa fa-check"></i></a> ';
+                } elseif ($isLeader && !$isCreator && ($leave['u_leader'] ?? '') == $admin_session['u_id']) {
+                    $actions .= '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ')" class="btn btn-success btn-xs" title="Manage"><i class="fa fa-check"></i></a> ';
+                }
+            }
+
+            // Master Admin can delete any leave
+            if (($admin_session['u_type'] ?? '') === 'Master Admin' && !$isCreator) {
+                $actions .= '<a href="javascript://" onclick="deleteRecord(' . $leave['l_id'] . ')" class="btn btn-danger btn-xs" title="Delete"><i class="fa fa-trash"></i></a> ';
+            }
             $actions .= '</div>';
             $row[] = $actions;
 
@@ -2037,6 +2253,19 @@ class Api extends BaseController
                     }
                 }
 
+                // Desktop notification for new message
+                if (!empty($u_ids) && $pm_id > 0) {
+                    $notifTitle = "New Message Added";
+                    $notifPayload = json_encode(['screen_name' => 'Message', 'id' => $pm_id]);
+                    foreach (array_unique($u_ids) as $nuid) {
+                        if (!is_numeric($nuid) || $nuid == $admin_session['u_id']) continue;
+                        $db->table('aa_desktop_notification_queue')->insert([
+                            'u_id' => $nuid, 'title' => $notifTitle, 'message' => $pm_text,
+                            'payload' => $notifPayload, 'is_sent' => 0,
+                        ]);
+                    }
+                }
+
                 echo json_encode(['status' => 'pass', 'message' => 'Message saved.']);
                 break;
 
@@ -2060,6 +2289,7 @@ class Api extends BaseController
                 $project_id = $request->getPost('project_id');
                 $search_date = $request->getPost('search_date');
                 $search_discipline = $request->getPost('search_discipline');
+                $leader_id = $request->getPost('leader_id');
 
                 $builder = $db->table('aa_project_messages PM');
                 $builder->select('PM.*, P.p_name, P.p_number, U.u_name as creator_name,
@@ -2070,7 +2300,7 @@ class Api extends BaseController
 
                 // Role-based filtering
                 $u_type = $admin_session['u_type'];
-                if (!in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
+                if (!in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator', 'MailCoordinator'])) {
                     $builder->groupStart()
                         ->where('PM.pm_created_by', $admin_session['u_id'])
                         ->orWhereIn('PM.pm_id', function($subquery) use ($admin_session) {
@@ -2079,6 +2309,21 @@ class Api extends BaseController
                                 ->where('pmu_u_id', $admin_session['u_id']);
                         })
                         ->groupEnd();
+                }
+
+                // Filter by selected leader - show messages from projects where this leader is p_leader
+                if (!empty($leader_id)) {
+                    $leaderProjects = $db->table('aa_projects')
+                        ->select('p_id')
+                        ->like('p_leader', $leader_id)
+                        ->where('p_status', 'Active')
+                        ->get()->getResultArray();
+                    $leaderProjectIds = array_column($leaderProjects, 'p_id');
+                    if (!empty($leaderProjectIds)) {
+                        $builder->whereIn('PM.pm_p_id', $leaderProjectIds);
+                    } else {
+                        $builder->where('PM.pm_id', 0); // no projects, no results
+                    }
                 }
 
                 if (!empty($project_id)) {
@@ -2198,6 +2443,19 @@ class Api extends BaseController
                     ->where('pmu_u_id !=', $admin_session['u_id'])
                     ->update(['pmu_read' => 0]);
 
+                // Desktop notification for reply - notify message creator
+                $origMsg = $db->table('aa_project_messages')->select('pm_created_by')->where('pm_id', $pm_id)->get()->getRowArray();
+                if ($origMsg && $origMsg['pm_created_by'] != $admin_session['u_id']) {
+                    $senderName = $admin_session['u_name'] ?? 'Someone';
+                    $db->table('aa_desktop_notification_queue')->insert([
+                        'u_id' => $origMsg['pm_created_by'],
+                        'title' => 'New Reply',
+                        'message' => $senderName . ' replied to your message',
+                        'payload' => json_encode(['screen_name' => 'Message', 'pm_id' => $pm_id]),
+                        'is_sent' => 0,
+                    ]);
+                }
+
                 echo json_encode(['status' => 'pass', 'message' => 'Reply saved.']);
                 break;
 
@@ -2219,6 +2477,28 @@ class Api extends BaseController
                     ->update(['pm_deleted' => 1]);
 
                 echo json_encode(['status' => 'pass', 'message' => 'Message deleted.']);
+                break;
+
+            case 'get_project_leaders':
+                $project_id = $request->getPost('project_id');
+                $leaders = [];
+                if ($project_id) {
+                    $project = $db->table('aa_projects')->select('p_leader')->where('p_id', $project_id)->get()->getRowArray();
+                    if ($project && !empty($project['p_leader'])) {
+                        $leaderIds = array_filter(explode(',', $project['p_leader']));
+                        if (!empty($leaderIds)) {
+                            // Only return Project Leader type users from the p_leader list
+                            $leaders = $db->table('aa_users')
+                                ->select('u_id, u_name')
+                                ->whereIn('u_id', $leaderIds)
+                                ->where('u_status', 'Active')
+                                ->where('u_type', 'Project Leader')
+                                ->orderBy('u_name', 'ASC')
+                                ->get()->getResultArray();
+                        }
+                    }
+                }
+                echo json_encode(['status' => 'pass', 'data' => $leaders]);
                 break;
 
             default:
@@ -2570,13 +2850,16 @@ class Api extends BaseController
                 foreach ($records as $rec) {
                     $row = [];
                     // Week
-                    $row[] = ($rec['week_from'] ?? '') . ' to ' . ($rec['week_to'] ?? '');
+                    $wf = (!empty($rec['week_from']) && $rec['week_from'] !== '0000-00-00') ? $rec['week_from'] : '';
+                    $wt = (!empty($rec['week_to']) && $rec['week_to'] !== '0000-00-00') ? $rec['week_to'] : '';
+                    $row[] = ($wf && $wt) ? $wf . ' to ' . $wt : ($wf ?: $wt);
                     // Project
-                    $row[] = ($rec['p_number'] ?? '') . ' - ' . ($rec['p_name'] ?? '');
+                    $row[] = $rec['p_name'] ?? '';
                     // Task
                     $row[] = $rec['task_name'] ?? '';
                     // Submission Date
-                    $row[] = $rec['submission_date'] ?? '';
+                    $sd = $rec['submission_date'] ?? '';
+                    $row[] = (!empty($sd) && $sd !== '0000-00-00') ? $sd : '';
                     // No. of Persons
                     $row[] = $rec['no_of_persons'] ?? 0;
                     // Assigned Employees
@@ -2660,15 +2943,47 @@ class Api extends BaseController
                     foreach ($dep_texts as $i => $depText) {
                         if (empty(trim($depText ?? ''))) continue;
                         $db->table('aa_weekly_work_dependency')->insert([
-                            'weekly_work_id' => $w_id,
+                            'w_id' => $w_id,
                             'dependency_text' => $depText,
                             'dependency_type' => $dep_types[$i] ?? '',
                             'priority' => $dep_priorities[$i] ?? '',
                             'status' => $dep_statuses[$i] ?? 'Pending',
                             'target_date' => !empty($dep_target_dates[$i]) ? $dep_target_dates[$i] : null,
                             'dep_leader_ids' => $dep_leaders[$i] ?? '',
-                            'created_at' => date('Y-m-d H:i:s'),
+                            'created_date' => date('Y-m-d'),
+                            'created_by' => $u_id,
                         ]);
+                    }
+                }
+
+                // Desktop notifications for Internal dependencies
+                if (is_array($dep_texts) && !empty(array_filter($dep_texts))) {
+                    $allLeaderIds = [];
+                    foreach ($dep_leaders as $dl) {
+                        if (!empty($dl)) {
+                            $ids = is_array($dl) ? $dl : explode(',', $dl);
+                            $allLeaderIds = array_merge($allLeaderIds, $ids);
+                        }
+                    }
+                    $allLeaderIds = array_unique(array_filter($allLeaderIds));
+
+                    if (!empty($allLeaderIds)) {
+                        $depUserNames = $db->table('aa_users')->select('u_name')->whereIn('u_id', $allLeaderIds)->get()->getResultArray();
+                        $depUserList = implode(', ', array_column($depUserNames, 'u_name'));
+
+                        $bimHeadIds = array_column($db->table('aa_users')->select('u_id')->where('u_type', 'Bim Head')->get()->getResultArray(), 'u_id');
+                        $notifyIds = array_unique(array_merge($allLeaderIds, $bimHeadIds));
+
+                        $title = "New Dependency Created by " . $admin_session['u_name'];
+                        $messageLoad = "A new dependency has been created by " . $admin_session['u_name'] . " for the following users: " . $depUserList;
+                        $payload = json_encode(['screen_name' => 'Dependency', 'action' => $title, 'id' => $w_id]);
+
+                        foreach ($notifyIds as $nuid) {
+                            $db->table('aa_desktop_notification_queue')->insert([
+                                'u_id' => $nuid, 'title' => $title, 'message' => $messageLoad,
+                                'payload' => $payload, 'is_sent' => 0,
+                            ]);
+                        }
                     }
                 }
 
@@ -2692,7 +3007,7 @@ class Api extends BaseController
 
                 // Get dependencies
                 $dependencies = $db->table('aa_weekly_work_dependency')
-                    ->where('weekly_work_id', $w_id)
+                    ->where('w_id', $w_id)
                     ->get()->getResultArray();
 
                 echo json_encode([
@@ -2752,18 +3067,18 @@ class Api extends BaseController
                 $keep_ids = array_filter($dep_ids);
                 if (!empty($keep_ids)) {
                     $db->table('aa_weekly_work_dependency')
-                        ->where('weekly_work_id', $w_id)
+                        ->where('w_id', $w_id)
                         ->whereNotIn('wd_id', $keep_ids)
                         ->delete();
                 } else {
-                    $db->table('aa_weekly_work_dependency')->where('weekly_work_id', $w_id)->delete();
+                    $db->table('aa_weekly_work_dependency')->where('w_id', $w_id)->delete();
                 }
 
                 if (is_array($dep_texts)) {
                     foreach ($dep_texts as $i => $depText) {
                         if (empty(trim($depText ?? ''))) continue;
                         $depData = [
-                            'weekly_work_id' => $w_id,
+                            'w_id' => $w_id,
                             'dependency_text' => $depText,
                             'dependency_type' => $dep_types[$i] ?? '',
                             'priority' => $dep_priorities[$i] ?? '',
@@ -2774,8 +3089,43 @@ class Api extends BaseController
                         if (!empty($dep_ids[$i])) {
                             $db->table('aa_weekly_work_dependency')->where('wd_id', $dep_ids[$i])->update($depData);
                         } else {
-                            $depData['created_at'] = date('Y-m-d H:i:s');
+                            $depData['created_date'] = date('Y-m-d');
+                            $depData['created_by'] = $u_id;
                             $db->table('aa_weekly_work_dependency')->insert($depData);
+                        }
+                    }
+                }
+
+                // Desktop notifications for dependency update
+                if (is_array($dep_texts) && !empty(array_filter($dep_texts))) {
+                    $allLeaderIds = [];
+                    foreach ($dep_leaders as $dl) {
+                        if (!empty($dl)) {
+                            $ids = is_array($dl) ? $dl : explode(',', $dl);
+                            $allLeaderIds = array_merge($allLeaderIds, $ids);
+                        }
+                    }
+                    $allLeaderIds = array_unique(array_filter($allLeaderIds));
+
+                    if (!empty($allLeaderIds)) {
+                        $depUserNames = $db->table('aa_users')->select('u_name')->whereIn('u_id', $allLeaderIds)->get()->getResultArray();
+                        $depUserList = implode(', ', array_column($depUserNames, 'u_name'));
+
+                        $project = $db->table('aa_projects')->select('p_name')->where('p_id', $request->getPost('p_id'))->get()->getRowArray();
+                        $projectName = $project ? $project['p_name'] : 'Unknown Project';
+
+                        $bimHeadIds = array_column($db->table('aa_users')->select('u_id')->where('u_type', 'Bim Head')->get()->getResultArray(), 'u_id');
+                        $notifyIds = array_unique(array_merge($allLeaderIds, $bimHeadIds));
+
+                        $title = "Dependency Updated by " . $admin_session['u_name'];
+                        $messageLoad = "The dependency in project " . $projectName . " has been updated by " . $admin_session['u_name'] . " for: " . $depUserList . ".";
+                        $payload = json_encode(['screen_name' => 'Dependency', 'action' => $title, 'id' => $w_id]);
+
+                        foreach ($notifyIds as $nuid) {
+                            $db->table('aa_desktop_notification_queue')->insert([
+                                'u_id' => $nuid, 'title' => $title, 'message' => $messageLoad,
+                                'payload' => $payload, 'is_sent' => 0,
+                            ]);
                         }
                     }
                 }
@@ -2787,7 +3137,7 @@ class Api extends BaseController
                 $w_id = $request->getPost('w_id');
                 if ($w_id) {
                     $db->table('aa_weekly_work_users')->where('weekly_work_id', $w_id)->delete();
-                    $db->table('aa_weekly_work_dependency')->where('weekly_work_id', $w_id)->delete();
+                    $db->table('aa_weekly_work_dependency')->where('w_id', $w_id)->delete();
                     $db->table('aa_weekly_work')->where('w_id', $w_id)->delete();
                     echo json_encode(['status' => 'pass', 'message' => 'Weekly work deleted successfully.']);
                 } else {
@@ -2801,11 +3151,11 @@ class Api extends BaseController
 
                 $builder = $db->table('aa_weekly_work_dependency WD');
                 $builder->select('WD.*, W.week_from, W.week_to, P.p_name as project_name, CU.u_name as created_by, AU.u_name as assigned_to');
-                $builder->join('aa_weekly_work W', 'WD.weekly_work_id = W.w_id', 'left');
+                $builder->join('aa_weekly_work W', 'WD.w_id = W.w_id', 'left');
                 $builder->join('aa_projects P', 'W.p_id = P.p_id', 'left');
                 $builder->join('aa_users CU', 'W.leader_id = CU.u_id', 'left');
                 $builder->join('aa_users AU', 'WD.dep_leader_ids = AU.u_id', 'left');
-                $builder->where('WD.weekly_work_id', $w_id);
+                $builder->where('WD.w_id', $w_id);
 
                 if ($type === 'incomplete') {
                     $builder->where('WD.status !=', 'Completed');
@@ -2813,6 +3163,251 @@ class Api extends BaseController
 
                 $deps = $builder->get()->getResultArray();
                 echo json_encode(['status' => 'pass', 'data' => $deps]);
+                break;
+
+            case 'dependencies_list':
+                $project_id = $request->getPost('project_id') ?? '';
+                $status = $request->getPost('status') ?? '';
+                $type = $request->getPost('type') ?? '';
+                $priority = $request->getPost('priority') ?? '';
+                $leader = $request->getPost('leader') ?? '';
+                $createdby = $request->getPost('createdby') ?? '';
+                $assigned_to = $request->getPost('assigned_to') ?? '';
+                $from_date = $request->getPost('from_date') ?? '';
+                $to_date = $request->getPost('to_date') ?? '';
+
+                $builder = $db->table('aa_weekly_work_dependency WD');
+                $builder->select('WD.*, W.p_id, W.leader_id, P.p_name, P.p_number, CU.u_name as created_by_name');
+                $builder->join('aa_weekly_work W', 'WD.w_id = W.w_id', 'left');
+                $builder->join('aa_projects P', 'W.p_id = P.p_id', 'left');
+                $builder->join('aa_users CU', 'WD.created_by = CU.u_id', 'left');
+
+                // Project Leader filter: only show dependencies from their assigned projects
+                if ($u_type === 'Project Leader') {
+                    $builder->like('P.p_leader', $u_id);
+
+                    // Sub-filter for Project Leader
+                    if ($createdby === 'own') {
+                        $builder->where('WD.created_by', $u_id);
+                    } elseif ($createdby === 'assigned') {
+                        $builder->where('WD.created_by !=', $u_id);
+                        $builder->like('WD.dep_leader_ids', $u_id);
+                    } elseif ($createdby === 'myall' || empty($createdby)) {
+                        $builder->groupStart()
+                            ->where('WD.created_by', $u_id)
+                            ->orLike('WD.dep_leader_ids', $u_id)
+                        ->groupEnd();
+                    }
+                    // 'all' = no additional filter within assigned projects
+                } elseif ($u_type === 'TaskCoordinator') {
+                    // TaskCoordinator sub-filter
+                    if ($createdby === 'own') {
+                        $builder->where('WD.created_by', $u_id);
+                    } elseif ($createdby === 'assigned') {
+                        $builder->where('WD.created_by !=', $u_id);
+                        $builder->like('WD.dep_leader_ids', $u_id);
+                    } elseif ($createdby === 'myall') {
+                        $builder->groupStart()
+                            ->where('WD.created_by', $u_id)
+                            ->orLike('WD.dep_leader_ids', $u_id)
+                        ->groupEnd();
+                    }
+                    // 'all' or empty = no filter, see everything
+                } elseif (!in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
+                    // Other roles: only their own or assigned to them
+                    $builder->groupStart()
+                        ->where('WD.created_by', $u_id)
+                        ->orLike('WD.dep_leader_ids', $u_id)
+                    ->groupEnd();
+                }
+
+                if (!empty($project_id)) {
+                    $builder->where('W.p_id', $project_id);
+                }
+                if (!empty($status) && $status !== 'All') {
+                    $builder->where('WD.status', $status);
+                }
+                if (!empty($type)) {
+                    $builder->where('WD.dependency_type', $type);
+                }
+                if (!empty($priority)) {
+                    $builder->where('WD.priority', $priority);
+                }
+                if (!empty($leader)) {
+                    $builder->where('WD.created_by', $leader);
+                }
+                if (!empty($from_date)) {
+                    $builder->where('WD.created_date >=', $from_date);
+                }
+                if (!empty($to_date)) {
+                    $builder->where('WD.created_date <=', $to_date . ' 23:59:59');
+                }
+
+                $builder->orderBy('WD.wd_id', 'DESC');
+                $deps = $builder->get()->getResultArray();
+
+                $data = [];
+                $sr = 1;
+                foreach ($deps as $dep) {
+                    // Get assigned leader names
+                    $assignedNames = '';
+                    if (!empty($dep['dep_leader_ids'])) {
+                        $leaderIds = array_filter(explode(',', $dep['dep_leader_ids']));
+                        if (!empty($leaderIds)) {
+                            $leaders = $db->table('aa_users')
+                                ->select('u_name')
+                                ->whereIn('u_id', $leaderIds)
+                                ->get()->getResultArray();
+                            $assignedNames = implode(', ', array_column($leaders, 'u_name'));
+                        }
+                    }
+
+                    $createdDate = $dep['created_date'] ?? '';
+                    if ($createdDate === '0000-00-00' || $createdDate === '0000-00-00 00:00:00') $createdDate = '';
+                    $targetDate = $dep['target_date'] ?? '';
+                    if ($targetDate === '0000-00-00') $targetDate = '';
+                    $completedAssignDate = $dep['completed_assign_date'] ?? '';
+                    if ($completedAssignDate === '0000-00-00 00:00:00') $completedAssignDate = '';
+
+                    $data[] = [
+                        '#' => $sr++,
+                        'wd_id' => $dep['wd_id'],
+                        'created_date' => $createdDate,
+                        'project_name' => $dep['p_name'] ?? '',
+                        'dependency_text' => $dep['dependency_text'] ?? '',
+                        'created_by' => $dep['created_by_name'] ?? '',
+                        'created_by_id' => $dep['created_by'] ?? '',
+                        'assigned_to' => $assignedNames,
+                        'dep_leader_ids' => $dep['dep_leader_ids'] ?? '',
+                        'dependency_type' => $dep['dependency_type'] ?? '',
+                        'priority' => $dep['priority'] ?? '',
+                        'status' => $dep['status'] ?? '',
+                        'target_date' => $targetDate,
+                        'completed_by_assigned' => $dep['completed_by_assigned'] ?? 0,
+                        'completed_assign_date' => $completedAssignDate,
+                        'completed_day_diff' => $dep['completed_day_diff'] ?? null,
+                        'completed_assign_status' => $dep['completed_assign_status'] ?? '',
+                    ];
+                }
+
+                echo json_encode(['data' => $data]);
+                break;
+
+            case 'complete_dependency':
+                $wd_id = $request->getPost('wd_id');
+                if ($wd_id) {
+                    $db->table('aa_weekly_work_dependency')->where('wd_id', $wd_id)->update([
+                        'status' => 'Completed',
+                        'completed_date' => date('Y-m-d'),
+                    ]);
+                    echo json_encode(['status' => 'success', 'message' => 'Dependency completed.']);
+                } else {
+                    echo json_encode(['status' => 'fail', 'message' => 'Invalid dependency.']);
+                }
+                break;
+
+            case 'assigned_complete_dependency':
+                $wd_id = $request->getPost('wd_id');
+                if ($wd_id) {
+                    $dep = $db->table('aa_weekly_work_dependency')->where('wd_id', $wd_id)->get()->getRowArray();
+                    if (!$dep) {
+                        echo json_encode(['status' => 'fail', 'message' => 'Dependency not found.']);
+                        break;
+                    }
+
+                    $targetDate = $dep['target_date'] ?? null;
+                    $today = date('Y-m-d');
+                    $dayDiff = null;
+                    $assignStatus = '';
+                    if (!empty($targetDate) && $targetDate !== '0000-00-00') {
+                        $diff = (strtotime($today) - strtotime($targetDate)) / 86400;
+                        $dayDiff = (int)$diff;
+                        if ($dayDiff < 0) $assignStatus = 'Early';
+                        elseif ($dayDiff == 0) $assignStatus = 'On Time';
+                        else $assignStatus = 'Delayed';
+                    }
+
+                    $db->table('aa_weekly_work_dependency')->where('wd_id', $wd_id)->update([
+                        'completed_by_assigned' => $u_id,
+                        'completed_assign_date' => date('Y-m-d H:i:s'),
+                        'completed_day_diff' => $dayDiff,
+                        'completed_assign_status' => $assignStatus,
+                    ]);
+
+                    // Notify the creator
+                    $work = $db->table('aa_weekly_work W')
+                        ->select('W.leader_id, P.p_name')
+                        ->join('aa_projects P', 'W.p_id = P.p_id', 'left')
+                        ->where('W.w_id', $dep['w_id'])
+                        ->get()->getRowArray();
+
+                    if ($work) {
+                        $title = "Dependency Completed by " . $admin_session['u_name'];
+                        $msg = "Dependency in project " . ($work['p_name'] ?? '') . " has been marked complete by " . $admin_session['u_name'];
+                        $db->table('aa_desktop_notification_queue')->insert([
+                            'u_id' => $work['leader_id'],
+                            'title' => $title,
+                            'message' => $msg,
+                            'payload' => json_encode(['screen_name' => 'Dependencies']),
+                            'is_sent' => 0,
+                        ]);
+                    }
+
+                    echo json_encode(['status' => 'success', 'message' => 'Dependency marked as complete.']);
+                } else {
+                    echo json_encode(['status' => 'fail', 'message' => 'Invalid dependency.']);
+                }
+                break;
+
+            case 'get_dependency':
+                $wd_id = $request->getPost('wd_id');
+                if ($wd_id) {
+                    $dep = $db->table('aa_weekly_work_dependency')->where('wd_id', $wd_id)->get()->getRowArray();
+                    if ($dep) {
+                        echo json_encode(['status' => 'success', 'data' => $dep]);
+                    } else {
+                        echo json_encode(['status' => 'fail', 'message' => 'Dependency not found.']);
+                    }
+                } else {
+                    echo json_encode(['status' => 'fail', 'message' => 'Invalid dependency.']);
+                }
+                break;
+
+            case 'update_dependency':
+                $wd_id = $request->getPost('wd_id');
+                if ($wd_id) {
+                    $depLeaderIds = $request->getPost('dep_leader_ids');
+                    $updateData = [
+                        'dependency_text' => $request->getPost('dependency_text') ?? '',
+                        'dependency_type' => $request->getPost('dependency_type') ?? '',
+                        'priority' => $request->getPost('priority') ?? '',
+                        'status' => $request->getPost('status') ?? '',
+                        'target_date' => !empty($request->getPost('dep_target_date')) ? $request->getPost('dep_target_date') : null,
+                        'dep_leader_ids' => is_array($depLeaderIds) ? implode(',', $depLeaderIds) : ($depLeaderIds ?? ''),
+                    ];
+                    if ($updateData['status'] === 'Completed') {
+                        $updateData['completed_date'] = date('Y-m-d');
+                    }
+                    $db->table('aa_weekly_work_dependency')->where('wd_id', $wd_id)->update($updateData);
+                    echo json_encode(['status' => 'success', 'message' => 'Dependency updated successfully.']);
+                } else {
+                    echo json_encode(['status' => 'fail', 'message' => 'Invalid dependency.']);
+                }
+                break;
+
+            case 'reverse_dependency':
+                $wd_id = $request->getPost('wd_id');
+                if ($wd_id) {
+                    $db->table('aa_weekly_work_dependency')->where('wd_id', $wd_id)->update([
+                        'completed_by_assigned' => null,
+                        'completed_assign_date' => null,
+                        'completed_day_diff' => null,
+                        'completed_assign_status' => null,
+                    ]);
+                    echo json_encode(['status' => 'success', 'message' => 'Dependency reversed successfully.']);
+                } else {
+                    echo json_encode(['status' => 'fail', 'message' => 'Invalid dependency.']);
+                }
                 break;
 
             default:

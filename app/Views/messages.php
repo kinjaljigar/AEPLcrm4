@@ -39,38 +39,44 @@ $users = $view_data['users'];
             </div>
             <div class="box-body">
                 <div class="row" style="margin-bottom:10px;">
-                    <!-- <div class="col-md-4">
-                        <label>Search Project</label>
-                        <select id="search_project" name="search_project" class="form-control">
-                            <option value="">All Projects</option>
+                    <div class="col-md-3">
+                        <label>Project</label>
+                        <select id="search_project" class="form-control project-select">
+                            <!-- existing project options loaded via JS -->
                         </select>
-                    </div> -->
-                    <div class="mb-2">
-                        <div class="col-md-4">
-                            <select id="search_project" class="form-control project-select">
-                                <!-- <option value="">All Projects</option> -->
-                                <!-- existing project options -->
-                            </select>
-                        </div>
+                    </div>
 
-                        <div class="col-md-3">
-                            <input type="date" id="search_date" class="form-control">
-                        </div>
+                    <?php if (in_array($view_data['admin_session']['u_type'], ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator', 'MailCoordinator'])): ?>
+                    <div class="col-md-2">
+                        <label>Leaders</label>
+                        <select id="search_leader" class="form-control">
+                            <option value="">All</option>
+                            <?php foreach ($view_data['allLeaders'] as $leader): ?>
+                                <option value="<?= $leader['u_id']; ?>"><?= htmlspecialchars($leader['u_name']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <?php endif; ?>
 
-                        <div class="col-md-3">
-                            <select id="search_discipline" class="form-control">
-                                <option value="">ALL</option>
-                                <option value="ARCH">ARCH</option>
-                                <option value="MEPF">MEPF</option>
-                                <option value="STR">STR</option>
-                                <option value="OTHER">OTHER</option>
+                    <div class="col-md-2">
+                        <label>Date</label>
+                        <input type="date" id="search_date" class="form-control">
+                    </div>
 
-                            </select>
-                        </div>
+                    <div class="col-md-2">
+                        <label>Discipline</label>
+                        <select id="search_discipline" class="form-control">
+                            <option value="">ALL</option>
+                            <option value="ARCH">ARCH</option>
+                            <option value="MEPF">MEPF</option>
+                            <option value="STR">STR</option>
+                            <option value="OTHER">OTHER</option>
+                        </select>
+                    </div>
 
-                        <div class="col-md-2">
-                            <button class="btn btn-primary" onclick="LoadData()">Search</button>
-                        </div>
+                    <div class="col-md-2">
+                        <label>&nbsp;</label><br>
+                        <button class="btn btn-primary" onclick="LoadData()">Search</button>
                     </div>
                 </div>
                 <table id="datatable" class="table table-bordered table-hover nowrap" width="100%">
@@ -205,15 +211,19 @@ $users = $view_data['users'];
 <script>
     var dataTable = null;
 
+    var hasLeaderFilter = <?= in_array($view_data['admin_session']['u_type'], ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator', 'MailCoordinator']) ? 'true' : 'false' ?>;
+    // Store all leaders options for resetting when project is cleared
+    var allLeadersHtml = '';
+
     function document_ready() {
         var base_url = "<?= base_url() ?>";
         LoadProjects();
-        LoadData();
 
-        // $(document).on("change", "#msg_type", function() {
-        //     if ($(this).val() == "broadcast") $("#projectDiv").hide();
-        //     else $("#projectDiv").show();
-        // });
+        if (hasLeaderFilter && $('#search_leader').length) {
+            allLeadersHtml = $('#search_leader').html();
+        }
+
+        LoadData();
 
         let defaultUsersHtml = `<?php foreach ($users as $user): ?>
     <option value="<?= $user['u_id']; ?>"><?= $user['u_name'] . " - " . $user['u_type']; ?></option>
@@ -227,26 +237,42 @@ $users = $view_data['users'];
                     type: "GET",
                     dataType: "json",
                     success: function(users) {
-
                         let options = "";
                         options += `<option value="ALL_PROJECT" selected='selected'>All Project Members</option>`;
                         users.forEach(user => {
                             let userTypeLabel = (user.u_type === 'Employee') ? 'Employee' : user.u_type;
-                            //options += `<option value="${user.u_id}">${user.u_name} - ${user.u_type}</option>`;
                             options += `<option value="${user.u_id}">${user.u_name} - ${userTypeLabel}</option>`;
                         });
                         $("#users").html(options);
                     }
                 });
             } else {
-                // reset if no project selected
-                //$("#users").html('<option value="">Select Users</option>');
                 $("#users").html(defaultUsersHtml);
             }
         });
-        // $(document).on("change", "#search_project", function() {
-        //     LoadData();
-        // });
+
+        // When search project changes, update leaders list to show only assigned leaders
+        $(document).on("change", "#search_project", function() {
+            if (!hasLeaderFilter || !$('#search_leader').length) return;
+            var projectId = $(this).val();
+            if (projectId) {
+                doAjax('api/projectmessages', 'POST', {
+                    act: 'get_project_leaders',
+                    project_id: projectId
+                }, function(res) {
+                    if (res.status == 'pass' && res.data) {
+                        var options = '<option value="">All</option>';
+                        res.data.forEach(function(leader) {
+                            options += '<option value="' + leader.u_id + '">' + leader.u_name + '</option>';
+                        });
+                        $('#search_leader').html(options);
+                    }
+                });
+            } else {
+                // Reset to all leaders
+                $('#search_leader').html(allLeadersHtml);
+            }
+        });
     }
 
     function LoadProjects() {
@@ -275,17 +301,20 @@ $users = $view_data['users'];
         if (logged_role === 'Master Admin' || logged_role === 'Bim Head' || logged_role === 'MailCoordinator') {
             exportButtons = ['excelHtml5', 'csvHtml5', 'pdfHtml5', 'print'];
         }
+        var ajaxData = {
+            act: "list",
+            project_id: $("#search_project").val(),
+            search_date: $("#search_date").val(),
+            search_discipline: $("#search_discipline").val()
+        };
+        if (hasLeaderFilter && $('#search_leader').length && $('#search_leader').val()) {
+            ajaxData.leader_id = $('#search_leader').val();
+        }
         dataTable = loadDataTable("#datatable", {
             "ajax": {
-
                 url: "<?php echo base_url('api/projectmessages'); ?>",
                 type: "POST",
-                data: {
-                    act: "list",
-                    project_id: $("#search_project").val(),
-                    search_date: $("#search_date").val(),
-                    search_discipline: $("#search_discipline").val()
-                }
+                data: ajaxData
             }
 
             ,

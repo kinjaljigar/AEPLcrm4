@@ -23,6 +23,11 @@ class Home extends BaseController
             return redirect()->to(base_url('home/login'));
         }
 
+        // MailCoordinator has no dashboard - redirect to messages
+        if (($this->admin_session['u_type'] ?? '') === 'MailCoordinator') {
+            return redirect()->to(base_url('home/messages'));
+        }
+
         // Load dashboard data
         $userModel = new UserModel();
 
@@ -55,42 +60,55 @@ class Home extends BaseController
         $u_type = $this->admin_session['u_type'] ?? '';
         $u_id = $this->admin_session['u_id'] ?? 0;
 
+        // Detect aa_weekly_work_dependency column names (CI3 uses w_id/created_date/created_by, CI4 may use weekly_work_id/created_at)
+        $fkCol = 'w_id';
+        $dateCol = 'created_date';
+        $hasCreatedBy = true;
+        try {
+            $cols = $db->getFieldNames('aa_weekly_work_dependency');
+            $fkCol = in_array('weekly_work_id', $cols) ? 'weekly_work_id' : 'w_id';
+            $dateCol = in_array('created_date', $cols) ? 'created_date' : 'created_at';
+            $hasCreatedBy = in_array('created_by', $cols);
+        } catch (\Exception $e) {
+            // Use defaults
+        }
+
         // Load latest dependencies (limit 20)
         try {
-            $depBuilder = $db->table('aa_weekly_work_dependency WD')
-                ->select('WD.*, WW.p_id, P.p_name as project_name, CU.u_name as created_by, WD.created_by as created_by_id')
-                ->join('aa_weekly_work WW', 'WD.weekly_work_id = WW.w_id', 'left')
-                ->join('aa_projects P', 'WW.p_id = P.p_id', 'left')
-                ->join('aa_users CU', 'WD.created_by = CU.u_id', 'left');
+
+            $createdBySelect = $hasCreatedBy
+                ? "WD.created_by AS created_by_id, CU.u_name AS created_by"
+                : "WW.leader_id AS created_by_id, LU.u_name AS created_by";
+            $createdByJoin = $hasCreatedBy
+                ? "LEFT JOIN aa_users CU ON WD.created_by = CU.u_id"
+                : "";
+
+            $depSql = "SELECT WD.*, WW.p_id, P.p_name AS project_name,
+                        {$createdBySelect},
+                        WD.{$dateCol} AS created_date,
+                        (SELECT GROUP_CONCAT(u2.u_name SEPARATOR ', ')
+                         FROM aa_users u2
+                         WHERE FIND_IN_SET(u2.u_id, WD.dep_leader_ids)) AS assigned_to
+                    FROM aa_weekly_work_dependency WD
+                    LEFT JOIN aa_weekly_work WW ON WD.{$fkCol} = WW.w_id
+                    LEFT JOIN aa_projects P ON WW.p_id = P.p_id
+                    LEFT JOIN aa_users LU ON WW.leader_id = LU.u_id
+                    {$createdByJoin}
+                    WHERE WD.status != 'Completed'";
 
             // For Project Leaders, only show their own or assigned to them
             if ($u_type == 'Project Leader') {
-                $depBuilder->groupStart()
-                    ->where('WW.leader_id', $u_id)
-                    ->orLike('WD.dep_leader_ids', (string)$u_id)
-                    ->groupEnd();
+                $depSql .= " AND (WW.leader_id = " . intval($u_id) . " OR FIND_IN_SET(" . intval($u_id) . ", WD.dep_leader_ids))";
             }
-            // For TaskCoordinator, show all
-            $depBuilder->where('WD.status !=', 'Completed');
-            $depBuilder->orderBy('WD.created_date', 'DESC');
-            $depBuilder->limit(20);
-            $deps = $depBuilder->get()->getResultArray();
 
-            // Resolve assigned_to names
-            foreach ($deps as &$dep) {
-                $dep['assigned_to'] = '';
-                if (!empty($dep['dep_leader_ids'])) {
-                    $leaderIds = explode(',', $dep['dep_leader_ids']);
-                    $names = $db->table('aa_users')
-                        ->select("GROUP_CONCAT(u_name SEPARATOR ', ') AS names")
-                        ->whereIn('u_id', $leaderIds)
-                        ->get()->getRowArray();
-                    $dep['assigned_to'] = $names['names'] ?? '';
-                }
-            }
-            unset($dep);
-            $this->view_data['dependencies'] = $deps;
+            $depSql .= " ORDER BY
+                CASE WD.status WHEN 'Pending' THEN 1 WHEN 'In Progress' THEN 2 ELSE 3 END ASC,
+                CASE WD.priority WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 3 ELSE 4 END ASC
+                LIMIT 20";
+
+            $this->view_data['dependencies'] = $db->query($depSql)->getResultArray();
         } catch (\Exception $e) {
+            log_message('error', 'Dashboard dependencies error: ' . $e->getMessage());
             $this->view_data['dependencies'] = [];
         }
 
@@ -98,19 +116,21 @@ class Home extends BaseController
         try {
             $leader_id = isset($_GET['leader_id']) ? intval($_GET['leader_id']) : null;
 
+            // Use detected column name for dependency FK
             $sql = "SELECT w.*, p.p_name AS project_name, u.u_name AS leader_name,
                 (SELECT COUNT(*) FROM aa_users WHERE u_leader = w.leader_id) AS team_assigned,
                 (SELECT GROUP_CONCAT(u2.u_name ORDER BY u2.u_name SEPARATOR ', ') FROM aa_weekly_work_users wu JOIN aa_users u2 ON u2.u_id = wu.u_id WHERE wu.weekly_work_id = w.w_id) AS assigned_users,
                 (SELECT COUNT(*) FROM aa_projects WHERE FIND_IN_SET(w.leader_id, p_leader)) AS no_of_projects,
-                (SELECT COUNT(*) FROM aa_weekly_work_dependency d WHERE d.weekly_work_id = w.w_id AND d.status != 'Completed') AS incomplete_deps
+                (SELECT COUNT(*) FROM aa_weekly_work_dependency d WHERE d.{$fkCol} = w.w_id AND d.status != 'Completed') AS incomplete_deps
                 FROM aa_weekly_work w
                 LEFT JOIN aa_projects p ON p.p_id = w.p_id
                 LEFT JOIN aa_users u ON u.u_id = w.leader_id
                 WHERE 1=1";
-            if ($leader_id) $sql .= " AND w.leader_id = " . $leader_id;
+            if ($leader_id) $sql .= " AND w.leader_id = " . intval($leader_id);
             $sql .= " ORDER BY w.w_id DESC LIMIT 20";
             $this->view_data['weekly_works'] = $db->query($sql)->getResultArray();
         } catch (\Exception $e) {
+            log_message('error', 'Dashboard weekly_works error: ' . $e->getMessage());
             $this->view_data['weekly_works'] = [];
         }
 
@@ -198,9 +218,14 @@ class Home extends BaseController
                         $this->session->set('token', $token);
 
                         // Return JSON response for AJAX
+                        // MailCoordinator goes directly to messages page
+                        $redirectUrl = ($user['u_type'] === 'MailCoordinator')
+                            ? base_url('home/messages')
+                            : base_url('home');
+
                         echo json_encode([
                             'status' => 'pass',
-                            'url' => base_url('home'),
+                            'url' => $redirectUrl,
                             'message' => 'Login successful'
                         ]);
                         exit;
@@ -476,14 +501,7 @@ class Home extends BaseController
         $this->view_data['p_leader'] = $users;
 
         // Project categories - default values
-        $this->view_data['p_cat'] = [
-            'Architecture',
-            'MEPF',
-            'Structural',
-            'Interior',
-            'Landscape',
-            'Other'
-        ];
+        $this->view_data['p_cat'] = ['BIM', 'Consultancy', 'Others'];
 
         $this->view_data['page'] = 'projects';
         $this->view_data['meta_title'] = 'Projects';
@@ -525,11 +543,21 @@ class Home extends BaseController
         $userModel = new UserModel();
         $users = $userModel->findAll();
 
+        // Get all Project Leaders for the leaders filter (for admin roles)
+        $db = \Config\Database::connect();
+        $allLeaders = $db->table('aa_users')
+            ->select('u_id, u_name')
+            ->where('u_status', 'Active')
+            ->where('u_type', 'Project Leader')
+            ->orderBy('u_name', 'ASC')
+            ->get()->getResultArray();
+
         $this->view_data['page'] = 'messages';
         $this->view_data['meta_title'] = 'Mail Links';
         $this->view_data['admin_session'] = $this->admin_session;
         $this->view_data['authorization'] = $this->authorization;
         $this->view_data['users'] = $users;
+        $this->view_data['allLeaders'] = $allLeaders;
         $this->view_data['plugins'] = ['datatable' => true, 'select2' => true];
         return view('template', ['view_data' => $this->view_data]);
     }
@@ -613,20 +641,32 @@ class Home extends BaseController
 
         if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
             $projects = $db->table('aa_projects')->where('p_status', 'Active')->orderBy('p_name', 'ASC')->get()->getResultArray();
+        } elseif ($u_type === 'Project Leader') {
+            // Project Leader: only show projects where they are p_leader
+            $projects = $db->table('aa_projects')
+                ->where('p_status', 'Active')
+                ->like('p_leader', $u_id)
+                ->orderBy('p_name', 'ASC')
+                ->get()->getResultArray();
         } else {
-            // Get projects where user is leader or assigned to tasks
+            // Other users: projects where assigned to tasks
             $projects = $db->query("SELECT DISTINCT P.* FROM aa_projects P
                 LEFT JOIN aa_task2user TU ON P.p_id = TU.tu_p_id AND TU.tu_removed = 'No'
-                WHERE P.p_status = 'Active' AND (P.p_leader LIKE '%{$u_id}%' OR TU.tu_u_id = '{$u_id}')
+                WHERE P.p_status = 'Active' AND TU.tu_u_id = '{$u_id}'
                 ORDER BY P.p_name ASC")->getResultArray();
         }
 
         // Get employees for dropdown
-        $employees = $db->table('aa_users')
+        $empBuilder = $db->table('aa_users')
             ->where('u_status', 'Active')
-            ->whereIn('u_type', ['Project Leader', 'Employee'])
-            ->orderBy('u_name', 'ASC')
-            ->get()->getResultArray();
+            ->whereIn('u_type', ['Project Leader', 'Employee']);
+
+        // Project Leader: only show employees assigned to them
+        if ($u_type === 'Project Leader') {
+            $empBuilder->where('u_leader', $u_id);
+        }
+
+        $employees = $empBuilder->orderBy('u_name', 'ASC')->get()->getResultArray();
 
         $this->view_data['projects'] = $projects;
         $this->view_data['employees'] = $employees;
@@ -645,18 +685,26 @@ class Home extends BaseController
         $u_id = $this->admin_session['u_id'] ?? '';
 
         if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator'])) {
-            $projects = $db->table('aa_projects')->select('p_id, p_name, p_number')->get()->getResultArray();
+            $projects = $db->table('aa_projects')->select('p_id, p_name, p_number')->where('p_status', 'Active')->get()->getResultArray();
+        } elseif ($u_type === 'Project Leader') {
+            // Project Leader: only projects where they are p_leader
+            $projects = $db->table('aa_projects')
+                ->select('p_id, p_name, p_number')
+                ->where('p_status', 'Active')
+                ->like('p_leader', $u_id)
+                ->orderBy('p_name', 'ASC')
+                ->get()->getResultArray();
         } else {
-            // Get projects where user is leader or assigned to tasks
+            // Other users: projects where assigned to tasks
             $projects = $db->query("SELECT DISTINCT P.p_id, P.p_name, P.p_number FROM aa_projects P
                 LEFT JOIN aa_task2user TU ON P.p_id = TU.tu_p_id AND TU.tu_removed = 'No'
-                WHERE P.p_status = 'Active' AND (P.p_leader LIKE '%{$u_id}%' OR TU.tu_u_id = '{$u_id}')
+                WHERE P.p_status = 'Active' AND TU.tu_u_id = '{$u_id}'
                 ORDER BY P.p_name ASC")->getResultArray();
         }
 
         $leaders = $db->table('aa_users')
             ->select('u_id, u_name, u_type')
-            ->whereIn('u_type', ['Project Leader', 'Master Admin', 'Bim Head'])
+            ->whereIn('u_type', ['Project Leader', 'Master Admin', 'Bim Head', 'TaskCoordinator'])
             ->where('u_status', 'Active')
             ->get()->getResultArray();
 
@@ -916,9 +964,7 @@ class Home extends BaseController
         if ($month < 4) $year--;
         $this->view_data['rpt_start'] = "01-04-" . $year;
         $this->view_data['rpt_end'] = date("d-m-Y");
-        $this->view_data['p_cat'] = [
-            'Architecture', 'MEPF', 'Structural', 'Interior', 'Landscape', 'Other'
-        ];
+        $this->view_data['p_cat'] = ['BIM', 'Consultancy', 'Others'];
 
         $projectModel = new ProjectModel();
         if ($this->authorization->is_bim_head_or_higher($this->admin_session)) {
@@ -970,9 +1016,7 @@ class Home extends BaseController
 
     public function report_profitloss()
     {
-        $this->view_data['p_cat'] = [
-            'Architecture', 'MEPF', 'Structural', 'Interior', 'Landscape', 'Other'
-        ];
+        $this->view_data['p_cat'] = ['BIM', 'Consultancy', 'Others'];
         $this->view_data['page'] = 'report_profitloss';
         $this->view_data['page_title'] = 'Profit/Loss Report';
         $this->view_data['meta_title'] = 'Profit/Loss Report';

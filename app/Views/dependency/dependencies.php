@@ -104,7 +104,7 @@ $leaders = $view_data['leaders'];
                                 <label>Project</label>
                                 <select id="filter_project" class="form-control project-select">
                                     <option value="">All</option>
-                                    <?php foreach ($projects as $p): ?>p_name
+                                    <?php foreach ($projects as $p): ?>
                                     <option value="<?= $p['p_id']; ?>"><?= $p['p_number'] . " - " . $p['p_name']; ?></option>
                                 <?php endforeach; ?>
                                 </select>
@@ -138,7 +138,7 @@ $leaders = $view_data['leaders'];
                                 </div> -->
                             <?php endif; ?>
 
-                            <?php if (in_array($view_data['admin_session']['u_type'], ['Project Leader'])): ?>
+                            <?php if (in_array($view_data['admin_session']['u_type'], ['Project Leader', 'TaskCoordinator'])): ?>
                                 <!-- <div class="col-md-1">
                                     <label>Dependencies</label>
                                     <select id="filter_viewtype" class="form-control">

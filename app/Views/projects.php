@@ -28,7 +28,8 @@
                             <option value="">All Categories</option>
                             <?php
                             foreach ($view_data['p_cat'] as $val) {
-                                echo '<option value="' . $val . '">' . $val . '</option>';
+                                $selected = ($val === 'BIM') ? ' selected' : '';
+                                echo '<option value="' . $val . '"' . $selected . '>' . $val . '</option>';
                             }
                             ?>
                         </select>

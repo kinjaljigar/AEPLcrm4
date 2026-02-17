@@ -22,8 +22,8 @@ $leader_id = $view_data['leader_id'];
                             style="width:220px; display:inline">
                             <option value="">-- Select Leader --</option>
                             <?php foreach ($leaders as $leader) { ?>
-                                <option value="<?= $leader->u_id ?>" <?= ($leader->u_id == $leader_id) ? 'selected' : '' ?>>
-                                    <?= $leader->u_name ?>
+                                <option value="<?= $leader['u_id'] ?>" <?= ($leader['u_id'] == $leader_id) ? 'selected' : '' ?>>
+                                    <?= $leader['u_name'] ?>
                                 </option>
                             <?php } ?>
                         </select>

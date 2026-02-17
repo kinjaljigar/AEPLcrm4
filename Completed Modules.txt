@@ -1,21 +1,20 @@
 Modules --- 
-login - working well
-logout - working well
-Projects 
-Tasks -- - working well
-Messages  - -working well
-Leaves
+login - working 
+logout - working 
+Projects - working 
+Tasks -- - working 
+Messages  - -working 
+Leaves   -- working 
 reports
-Holidays   - -is working well
-Timesheet
-Employees     --------- number of employees shown as different - working well
-settings --  is workng well
-ticket -- 
-
-
+Holidays   - -is working 
+Timesheet -- is working
+Employees     --------- number of employees shown as different - working 
+settings --  is workng 
+ticket --  is working 
+dashboard -- mostly working 
+Dependencies -
 
 Users as Masteradmin ,Bim head , Super admin
-
 
 
 
@@ -23,12 +22,12 @@ User as Project Leader
 
 
 
-
-
 User as a coordinator
 
 
 
-
-
 User as mailcooridnator
+
+
+
+user as Employee

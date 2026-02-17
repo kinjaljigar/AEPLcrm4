@@ -211,6 +211,8 @@ if (isset($view_data['plugins'])) {
                             $authorization = new \App\Libraries\Authorization();
                             if ($authorization->is_role_allowed($u_type, ['TaskCoordinator'])) {
                                 $menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');
+                                $menu['dependency'] = array('Weekly Work + Dependency', 'home/dependency', 'fa-hand-o-right');
+                                $menu['dependencies'] = array('All Dependencies', 'home/dependencies', 'fa-hand-o-right');
                             } else if ($authorization->is_role_allowed($u_type, ['MailCoordinator'])) {
                                 //$menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');
                                 $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
@@ -553,20 +555,19 @@ if (isset($view_data['plugins'])) {
 
                     switch (payload.screen_name) {
                         case 'Task':
-                            window.open('/usertask/view/' + payload.id, '_blank');
+                            window.open('<?= base_url("usertask/view/") ?>' + payload.id, '_blank');
                             break;
                         case 'Schedule':
-                            window.open('/schedule/view/' + payload.id, '_blank');
+                            window.open('<?= base_url("schedule/view/") ?>' + payload.id, '_blank');
                             break;
                         case 'Conference':
-                            window.open('/conference/view/' + payload.id, '_blank');
+                            window.open('<?= base_url("conference/view/") ?>' + payload.id, '_blank');
                             break;
                         case 'Ticket':
-                            window.open('/ticket/view/' + payload.id, '_blank');
+                            window.open('<?= base_url("ticket/view/") ?>' + payload.id, '_blank');
                             break;
                         case 'Dependency':
-                            //window.open('/dependency' + payload.id, '_blank');
-                            window.open('/dependencies', '_blank');
+                            window.open('<?= base_url("home/dependencies") ?>', '_blank');
                             break;
                         default:
                             console.warn('Unknown screen_name:', payload.screen_name);
