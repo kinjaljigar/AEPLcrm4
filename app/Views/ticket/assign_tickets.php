@@ -24,23 +24,22 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
                     <div class="col-xs-12">
                         <form method="post" action="<?= site_url('ticket/assigned') ?>" class="form-inline mb-3">
                             <div class="form-group mr-2">
-                                <label for="ticket_number">Ticket #</label>
-                                <input type="text" name="ticket_number" id="ticket_number" class="form-control" value="<?= $view_data['ticket_number']; ?>">
+                                <label for="created_by">Created By</label>
+                                <input type="text" name="created_by" id="created_by" class="form-control" value="<?= htmlspecialchars($view_data['created_by']); ?>">
                             </div>
 
                             <div class="form-group mr-2">
-                                <label for="subject">Title</label>
-                                <input type="text" name="subject" id="subject" class="form-control" value="<?= $view_data['subject']; ?>">
+                                <label for="desktop_number">Desktop No.</label>
+                                <input type="text" name="desktop_number" id="desktop_number" class="form-control" value="<?= htmlspecialchars($view_data['desktop_number']); ?>">
                             </div>
 
                             <div class="form-group mr-2">
                                 <label for="status">Status</label>
                                 <select name="status" id="status" class="form-control">
+                                    <option value="" <?= $view_data['status'] === '' ? 'selected' : '' ?>>All</option>
                                     <option value="open" <?= $view_data['status'] == 'open' ? 'selected' : '' ?>>Open</option>
-                                    <option value="pending" <?= $view_data['status'] == 'pending' ? 'selected' : '' ?>>pending</option>
+                                    <option value="pending" <?= $view_data['status'] == 'pending' ? 'selected' : '' ?>>Pending</option>
                                     <option value="closed" <?= $view_data['status'] == 'closed' ? 'selected' : '' ?>>Closed</option>
-                                    <option value="">All</option>
-
                                 </select>
                             </div>
 

@@ -102,15 +102,12 @@ if (isset($view_data['plugins'])) {
                                     <span class="hidden-xsl"
                                         style="font-weight:bold;font-size:16px;"><?php echo isset($view_data['admin_session']['u_name']) ? "Hi, " . $view_data['admin_session']['u_name'] : ''; ?></span>
                                 </a>
-                                <?php /* <ul class="dropdown-menu">
-                                      <!-- Menu Footer-->
-                                      <li class="user-footer">
-                                      <div class="pull-right">
-                                      <a class="btn btn-default btn-flat" href="<?php echo base_url(); ?>availadmin/logout">Sign
-                            out</a>
-                </div>
-                </li>
-                </ul> */ ?>
+                            </li>
+                            <li>
+                                <a href="<?= base_url('home/logout') ?>" title="Sign Out" style="padding-top:12px;padding-bottom:12px;">
+                                    <i class="fa fa-sign-out" style="font-size:18px;"></i>
+                                    <span class="hidden-xs" style="margin-left:4px;">Sign Out</span>
+                                </a>
                             </li>
                         </ul>
                     </div>

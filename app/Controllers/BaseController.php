@@ -136,14 +136,16 @@ abstract class BaseController extends Controller
                                   ($this->authorization->is_role_allowed($this->admin_session['u_type'] ?? '', ['Project Leader', 'TaskCoordinator']) && $method == 'index');
 
                     if (!$has_access) {
-                        return redirect()->to(base_url('home/tasks'));
+                        header('Location: ' . base_url('home/tasks'));
+                        exit;
                     }
                 }
 
                 // Check master method access
                 if (in_array($method, $this->master_methods)) {
                     if (!$this->authorization->is_admin($this->admin_session)) {
-                        return redirect()->to(base_url('home/tasks'));
+                        header('Location: ' . base_url('home/tasks'));
+                        exit;
                     }
                 }
 
@@ -157,8 +159,10 @@ abstract class BaseController extends Controller
                 // $messages = $messageModel->getRecords($params);
                 // $this->session->set('messages', $messages);
             } else {
-                // Not logged in, redirect to login
-                return redirect()->to(base_url('home/login'));
+                // Not logged in - redirect to login and stop execution
+                // Note: return redirect() in initController() does NOT stop method execution in CI4
+                header('Location: ' . base_url('home/login'));
+                exit;
             }
         }
     }

@@ -400,8 +400,8 @@ class Ticket extends BaseController
         $db = \Config\Database::connect();
         $u_id = $this->admin_session['u_id'];
 
-        $ticket_number = $request->getPost('ticket_number') ?? '';
-        $subject = $request->getPost('subject') ?? '';
+        $created_by = $request->getPost('created_by') ?? '';
+        $desktop_number = $request->getPost('desktop_number') ?? '';
         $status = $request->getPost('status') ?? 'open';
         $from_date = $request->getPost('from_date') ?? '';
         $to_date = $request->getPost('to_date') ?? '';
@@ -420,9 +420,9 @@ class Ticket extends BaseController
             $builder->join('aa_ticket_categories tc', 't.category_id = tc.id', 'left');
             $builder->join('aa_users u', 't.u_id = u.u_id', 'left');
             $builder->whereIn('t.category_id', $cat_ids);
-            if (!empty($ticket_number)) $builder->like('t.ticket_number', $ticket_number);
-            if (!empty($subject)) $builder->like('t.subject', $subject);
-            if (!empty($status)) $builder->where('t.status', $status);
+            if (!empty($created_by)) $builder->like('u.u_name', $created_by);
+            if (!empty($desktop_number)) $builder->like('t.desktop_number', $desktop_number);
+            if ($status !== '') $builder->where('t.status', $status);
             if (!empty($from_date)) $builder->where('t.created_at >=', $from_date . ' 00:00:00');
             if (!empty($to_date)) $builder->where('t.created_at <=', $to_date . ' 23:59:59');
             $builder->orderBy('t.created_at', 'DESC');
@@ -435,8 +435,8 @@ class Ticket extends BaseController
         $this->view_data['authorization'] = $this->authorization;
         $this->view_data['token'] = $this->session->get('token');
         $this->view_data['tickets'] = $tickets;
-        $this->view_data['ticket_number'] = $ticket_number;
-        $this->view_data['subject'] = $subject;
+        $this->view_data['created_by'] = $created_by;
+        $this->view_data['desktop_number'] = $desktop_number;
         $this->view_data['status'] = $status;
         $this->view_data['from_date'] = $from_date;
         $this->view_data['to_date'] = $to_date;
