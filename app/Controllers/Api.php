@@ -256,7 +256,7 @@ class Api extends BaseController
                 $builder = $db->table('aa_leaves L')
                     ->select('L.*, U.u_name, U.u_department')
                     ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
-                    ->where('L.l_status', 'Approve')
+                    ->where('L.l_status', 'Approved')
                     ->where('L.l_from_date <=', $today)
                     ->where('L.l_to_date >=', $today)
                     ->orderBy('U.u_name', 'ASC');
@@ -670,6 +670,16 @@ class Api extends BaseController
                                 'tu_p_id' => $t_p_id,
                                 'tu_removed' => 'No',
                             ]);
+                            // Notify each assigned user (skip if it's the creator)
+                            if ($uid != $t_u_id) {
+                                $db->table('aa_desktop_notification_queue')->insert([
+                                    'u_id'    => $uid,
+                                    'title'   => 'New Task Assigned',
+                                    'message' => 'Task "' . $t_title . '" has been assigned to you by ' . $admin_session['u_name'],
+                                    'payload' => json_encode(['screen_name' => 'Task', 'id' => $t_id]),
+                                    'is_sent' => 0,
+                                ]);
+                            }
                         }
                     }
                 }
@@ -727,6 +737,17 @@ class Api extends BaseController
                             'tu_u_id' => $t_assign,
                             'tu_p_id' => $t_p_id,
                             'tu_removed' => 'No',
+                        ]);
+                    }
+                    // Notify the assigned user (skip if assigning to self)
+                    if ($t_assign != $admin_session['u_id']) {
+                        $taskRow = $db->table('aa_tasks')->select('t_title')->where('t_id', $t_id)->get()->getRowArray();
+                        $db->table('aa_desktop_notification_queue')->insert([
+                            'u_id'    => $t_assign,
+                            'title'   => 'Task Assigned',
+                            'message' => 'Task "' . ($taskRow['t_title'] ?? '') . '" has been assigned to you by ' . $admin_session['u_name'],
+                            'payload' => json_encode(['screen_name' => 'Task', 'id' => $t_id]),
+                            'is_sent' => 0,
                         ]);
                     }
                 } elseif ($act_sub == 'del') {
@@ -1250,7 +1271,7 @@ class Api extends BaseController
             $actions = '<div class="actions">';
             $actions .= '<a href="' . base_url('home/project_detail/' . $project['p_id']) . '" class="btn btn-success btn-xs" title="View"><i class="fa fa-eye"></i></a> ';
             $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $project['p_id'] . ', \'' . $admin_session['u_type'] . '\')" class="btn btn-primary btn-xs" title="Edit"><i class="fa fa-edit"></i></a> ';
-            $actions .= '<a href="' . base_url('home/project_contacts/' . $project['p_id']) . '" class="btn btn-info btn-xs" title="Project Contacts"><i class="fa fa-address-book"></i></a> ';
+            $actions .= '<a href="' . base_url('home/project_contacts/' . $project['p_id']) . '" class="btn btn-warning btn-xs" title="Project Contacts"><i class="fa fa-phone"></i></a> ';
 
             if ($admin_session['u_type'] == 'Super Admin' || $admin_session['u_type'] == 'Master Admin') {
                 $actions .= '<a href="javascript://" onclick="deleteRecord(' . $project['p_id'] . ')" class="btn btn-danger btn-xs" title="Delete"><i class="fa fa-trash"></i></a>';
@@ -1333,6 +1354,15 @@ class Api extends BaseController
                 $userData['created_at'] = date('Y-m-d H:i:s');
                 $userData['updated_at'] = date('Y-m-d H:i:s');
                 $db->table('aa_users')->insert($userData);
+                $u_id = $db->insertID();
+            }
+
+            // Handle photo upload (save to root assets/logos/ to match URL)
+            $photoFile = $request->getFile('logo_file');
+            if ($photoFile && $photoFile->isValid() && !$photoFile->hasMoved()) {
+                $photoDir = ROOTPATH . 'assets/logos/';
+                if (!is_dir($photoDir)) mkdir($photoDir, 0777, true);
+                $photoFile->move($photoDir, 'ulogo_' . $u_id . '.jpg');
             }
 
             echo json_encode(['status' => 'pass', 'message' => 'Employee saved successfully.']);
@@ -1350,12 +1380,42 @@ class Api extends BaseController
             exit;
         }
 
+        // Handle task-page employee search (list_task)
+        if ($act === 'list_task') {
+            $txt_search = $request->getPost('txt_search') ?? '';
+            $today = date('Y-m-d');
+            $qb = $db->table('aa_users')
+                ->select('u_id, u_username, u_name')
+                ->whereIn('u_type', ['Project Leader', 'Employee', 'Bim Head', 'TaskCoordinator'])
+                ->where('u_status', 'Active')
+                ->orderBy('u_name', 'ASC');
+            if ($txt_search) $qb->like('u_name', $txt_search);
+            $users = $qb->get()->getResultArray();
+
+            $data = [];
+            $active_projects = [];
+            $active_tasks = [];
+            $leaves = [];
+            foreach ($users as $u) {
+                $uid = $u['u_id'];
+                $data[] = [$uid, $u['u_username'], $u['u_name']];
+                $active_projects[$uid] = $db->table('aa_task2user')->distinct()->select('tu_p_id')->where('tu_u_id', $uid)->where('tu_removed', 'No')->countAllResults();
+                $active_tasks[$uid] = $db->table('aa_tasks T')->join('aa_task2user TU', 'T.t_id = TU.tu_t_id')->where('TU.tu_u_id', $uid)->where('TU.tu_removed', 'No')->whereNotIn('T.t_status', ['Completed', 'Cancelled'])->countAllResults();
+                $leaveRec = $db->table('aa_leaves')->select('l_from_date, l_to_date')->where('l_u_id', $uid)->where('l_status', 'Approved')->where('l_from_date <=', $today)->where('l_to_date >=', $today)->get()->getRowArray();
+                $leaves[$uid] = $leaveRec ? date('d-m-Y', strtotime($leaveRec['l_from_date'])) . ' - ' . date('d-m-Y', strtotime($leaveRec['l_to_date'])) : '';
+            }
+            echo json_encode(['status' => 'pass', 'data' => $data, 'active_projects' => $active_projects, 'active_tasks' => $active_tasks, 'leaves' => $leaves]);
+            exit;
+        }
+
         // Handle single record fetch for edit
         if ($act === 'list' && $u_id) {
             $userModel = new \App\Models\UserModel();
             $user = $userModel->find($u_id);
 
             if ($user) {
+                $photoPath = ROOTPATH . 'assets/logos/ulogo_' . $u_id . '.jpg';
+                $user['u_photo'] = file_exists($photoPath) ? base_url('assets/logos/ulogo_' . $u_id . '.jpg') : '';
                 echo json_encode([
                     'status' => 'pass',
                     'data' => $user
@@ -1890,13 +1950,25 @@ class Api extends BaseController
 
                 $l_status = $request->getPost('l_status');
                 $l_reply = $request->getPost('l_reply') ?? '';
+                $leaveOwner = $db->table('aa_leaves')->select('l_u_id, l_from_date, l_to_date')->where('l_id', $l_id)->get()->getRowArray();
                 $db->table('aa_leaves')->where('l_id', $l_id)->update([
                     'l_status' => $l_status,
                     'l_reply' => $l_reply,
                     'l_approved_by' => $admin_session['u_name'],
                     'l_approved_by_id' => $admin_session['u_id'],
                 ]);
-                echo json_encode(['status' => 'pass', 'message' => 'Leave ' . $l_status . 'd successfully.']);
+                // Notify the leave owner
+                if ($leaveOwner && $leaveOwner['l_u_id'] != $admin_session['u_id']) {
+                    $leaveDate = date('d-m-Y', strtotime($leaveOwner['l_from_date']));
+                    $db->table('aa_desktop_notification_queue')->insert([
+                        'u_id'    => $leaveOwner['l_u_id'],
+                        'title'   => 'Leave ' . $l_status,
+                        'message' => 'Your leave request for ' . $leaveDate . ' has been ' . strtolower($l_status) . ' by ' . $admin_session['u_name'],
+                        'payload' => json_encode(['screen_name' => 'Leave']),
+                        'is_sent' => 0,
+                    ]);
+                }
+                echo json_encode(['status' => 'pass', 'message' => 'Leave ' . $l_status . ' successfully.']);
             }
             exit;
         }
@@ -3693,25 +3765,52 @@ class Api extends BaseController
                 break;
 
             case 'hourly_leave':
+                // Aggregated per-employee view (5 columns)
+                $qb = $db->table('aa_leaves L')
+                    ->select('U.u_id, U.u_name,
+                        SUM(L.l_hourly_time_hour) AS total_hours,
+                        SUM(CASE WHEN L.l_status = "Approved" THEN L.l_hourly_time_hour ELSE 0 END) AS approved_hours,
+                        SUM(CASE WHEN L.l_status = "Declined" THEN L.l_hourly_time_hour ELSE 0 END) AS declined_hours')
+                    ->join('aa_users U', 'U.u_id = L.l_u_id')
+                    ->where('L.l_is_hourly', 'Yes')
+                    ->where('L.l_from_date >=', $rpt_start)
+                    ->where('L.l_to_date <=', $rpt_end)
+                    ->groupBy('U.u_id');
+                if ($txt_search) $qb->like('U.u_name', $txt_search);
+                $records = $qb->get()->getResultArray();
+                $data = [];
+                foreach ($records as $rec) {
+                    $row = [];
+                    $row[] = htmlspecialchars($rec['u_name']);
+                    $row[] = number_format($rec['total_hours'] ?? 0, 2);
+                    $row[] = number_format($rec['approved_hours'] ?? 0, 2);
+                    $row[] = number_format($rec['declined_hours'] ?? 0, 2);
+                    $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showData(\'' . $rec['u_id'] . '\', \'' . addslashes($rec['u_name']) . '\', \'' . $rpt_start . '\', \'' . $rpt_end . '\')"><i class="fa fa-eye"></i></a>';
+                    $data[] = $row;
+                }
+                echo json_encode(['draw' => intval($draw), 'recordsTotal' => count($data), 'recordsFiltered' => count($data), 'data' => $data]);
+                break;
+
             case 'hourly_leave_date':
+                // Individual records for a specific date (8 columns)
                 $records = $db->table('aa_leaves L')
                     ->select('L.*, U.u_name')
                     ->join('aa_users U', 'U.u_id = L.l_u_id')
                     ->where('L.l_is_hourly', 'Yes')
                     ->where('L.l_from_date >=', $rpt_start)
-                    ->where('L.l_to_date <=', ($type == 'hourly_leave_date' ? $rpt_start : $rpt_end))
+                    ->where('L.l_to_date <=', $rpt_start)
                     ->get()->getResultArray();
                 $data = [];
                 foreach ($records as $rec) {
                     $row = [];
-                    $row[] = $rec['u_name'];
+                    $row[] = htmlspecialchars($rec['u_name']);
                     $row[] = date("d-m-Y", strtotime($rec['l_create_date']));
                     $row[] = date("d-m-Y", strtotime($rec['l_from_date']));
                     $row[] = date("d-m-Y", strtotime($rec['l_to_date']));
                     $row[] = number_format($rec['l_hourly_time_hour'] ?? 0, 2);
                     $row[] = $rec['l_status'];
                     $row[] = $rec['l_hourly_time'] ?? '';
-                    $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showData(\'' . $rec['l_u_id'] . '\', \'' . $rec['u_name'] . '\', \'' . $rpt_start . '\', \'' . $rpt_end . '\')"><i class="fa fa-eye"></i></a>';
+                    $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showData(\'' . $rec['l_u_id'] . '\', \'' . addslashes($rec['u_name']) . '\', \'' . $rpt_start . '\', \'' . $rpt_start . '\')"><i class="fa fa-eye"></i></a>';
                     $data[] = $row;
                 }
                 echo json_encode(['draw' => intval($draw), 'recordsTotal' => count($data), 'recordsFiltered' => count($data), 'data' => $data]);
@@ -4183,7 +4282,9 @@ class Api extends BaseController
                     $nestedData[] = htmlspecialchars($row['assigned_users'] ?? '-');
                     $nestedData[] = (int)($row['no_of_projects'] ?? 0);
                     $nestedData[] = htmlspecialchars($row['project_name'] ?? '');
-                    $nestedData[] = htmlspecialchars(($row['week_from'] ?? '') . ' to ' . ($row['week_to'] ?? ''));
+                    $wf = !empty($row['week_from']) ? date('d-m-Y', strtotime($row['week_from'])) : '';
+                    $wt = !empty($row['week_to'])   ? date('d-m-Y', strtotime($row['week_to']))   : '';
+                    $nestedData[] = htmlspecialchars($wf . ' to ' . $wt);
                     $nestedData[] = htmlspecialchars($row['task_name'] ?? '');
                     $nestedData[] = htmlspecialchars($row['submission_date'] ?? '');
                     $nestedData[] = htmlspecialchars($row['status'] ?? '');
@@ -4295,11 +4396,50 @@ class Api extends BaseController
         header('Content-Type: application/json');
 
         $request = service('request');
+        $db = \Config\Database::connect();
+
+        $draw       = intval($request->getPost('draw') ?? 1);
+        $start      = intval($request->getPost('start') ?? 0);
+        $length     = intval($request->getPost('length') ?? 25);
+        $project_id = $request->getPost('project_id');
+        $search_date = $request->getPost('search_date');
+        $discipline  = $request->getPost('discipline');
+
+        $qb = $db->table('aa_project_messages pm')
+            ->select('p.p_name, pm.pm_datetime, pm.pm_text, pm.pm_descipline,
+                GROUP_CONCAT(pmr.pmr_text ORDER BY pmr.pmr_datetime SEPARATOR "\n") AS replies')
+            ->join('aa_projects p', 'p.p_id = pm.pm_p_id')
+            ->join('aa_project_message_replies pmr', 'pmr.pmr_pm_id = pm.pm_id', 'left')
+            ->where('pm.pm_deleted', 0)
+            ->groupBy('pm.pm_id')
+            ->orderBy('pm.pm_datetime', 'DESC');
+
+        if (!empty($project_id)) $qb->where('pm.pm_p_id', intval($project_id));
+        if (!empty($search_date)) $qb->where('DATE(pm.pm_datetime)', $search_date);
+        if (!empty($discipline)) $qb->where('pm.pm_descipline', $discipline);
+
+        $totalQuery = clone $qb;
+        $total = count($totalQuery->get()->getResultArray());
+
+        if ($length > 0) $qb->limit($length, $start);
+        $records = $qb->get()->getResultArray();
+
+        $data = [];
+        foreach ($records as $rec) {
+            $row = [];
+            $row[] = htmlspecialchars($rec['p_name']);
+            $row[] = $rec['pm_datetime'] ? date('d-m-Y', strtotime($rec['pm_datetime'])) : '';
+            $row[] = htmlspecialchars($rec['pm_text'] ?? '');
+            $row[] = htmlspecialchars($rec['pm_descipline'] ?? '');
+            $row[] = $rec['replies'] ?? '';
+            $data[] = $row;
+        }
+
         echo json_encode([
-            'draw' => $request->getPost('draw') ?? 1,
-            'recordsTotal' => 0,
-            'recordsFiltered' => 0,
-            'data' => []
+            'draw'            => $draw,
+            'recordsTotal'    => $total,
+            'recordsFiltered' => $total,
+            'data'            => $data,
         ]);
         exit;
     }

@@ -155,12 +155,12 @@
             <textarea type="text" class="form-control" id="l_reply" name="l_reply"></textarea>
         </div>
         <div class="form-group">
-            <label class="check_container inline">Apporve
-                <input type="radio" id="l_status_a" name="l_status" value="Approve">
+            <label class="check_container inline">Approve
+                <input type="radio" id="l_status_a" name="l_status" value="Approved">
                 <span class="checkmark"></span>
             </label>
             <label class="check_container inline">Decline
-                <input type="radio" id="l_status_d" name="l_status" value="Decline">
+                <input type="radio" id="l_status_d" name="l_status" value="Declined">
                 <span class="checkmark"></span>
             </label> <br />
             <label id="l_status-error" class="has-error" for="l_status" style="display:none;">This field is

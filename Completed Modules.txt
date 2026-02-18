@@ -14,20 +14,20 @@ ticket --  is working
 dashboard -- mostly working 
 Dependencies -
 
-Users as Masteradmin ,Bim head , Super admin
+
+Notifications ----------------------------------------------------
+Already Working (existing code, no changes needed)
+Event	Who Gets It	Click Opens
+New Ticket created	All users assigned to ticket category	Ticket view page
+Ticket message added	Assigned users + creator (cross-notified)	Ticket view page
+Ticket closed	Assigned users + creator (cross-notified)	Ticket view page
+New project message sent	All selected recipients (except sender)	Messages page
+Project message reply	Original message creator	Messages page
+Dependency created	Dep leaders + all BIM Heads	Dependencies report
+Dependency updated	Dep leaders + all BIM Heads	Dependencies report
+Dependency marked complete	Weekly work leader	Dependencies report
 
 
 
-User as Project Leader
-
-
-
-User as a coordinator
-
-
-
-User as mailcooridnator
-
-
-
-user as Employee
+Users check for 
+master admin  ,Bim Head , TaskCooridnator , MailCoordinator , Superadmin , Employee

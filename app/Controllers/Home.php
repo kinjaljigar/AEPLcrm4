@@ -28,6 +28,11 @@ class Home extends BaseController
             return redirect()->to(base_url('home/messages'));
         }
 
+        // Employee has no dashboard - redirect to tasks
+        if (($this->admin_session['u_type'] ?? '') === 'Employee') {
+            return redirect()->to(base_url('home/tasks'));
+        }
+
         // Load dashboard data
         $userModel = new UserModel();
 
@@ -449,7 +454,7 @@ class Home extends BaseController
         $this->view_data['task'] = $task;
         $this->view_data['t_id'] = $t_id;
         $this->view_data['employees'] = $employees;
-        $this->view_data['priorities'] = ['Urgent', 'High', 'Medium', 'Low'];
+        $this->view_data['priorities'] = range(1, 20);
         $this->view_data['return_url'] = $_SERVER['HTTP_REFERER'] ?? base_url('home/tasks');
         $this->view_data['page'] = 'task';
         $this->view_data['meta_title'] = 'Edit Task';
@@ -792,10 +797,10 @@ class Home extends BaseController
         $u_id = $this->admin_session['u_id'];
 
         if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
-            $projects = $db->table('aa_projects')->select('p_id, p_name')->get()->getResultArray();
+            $projects = $db->table('aa_projects')->select('p_id, p_number, p_name')->get()->getResultArray();
         } else {
             // Get projects where user is leader or assigned to tasks
-            $projects = $db->query("SELECT DISTINCT P.p_id, P.p_name FROM aa_projects P
+            $projects = $db->query("SELECT DISTINCT P.p_id, P.p_number, P.p_name FROM aa_projects P
                 LEFT JOIN aa_task2user TU ON P.p_id = TU.tu_p_id AND TU.tu_removed = 'No'
                 WHERE P.p_status = 'Active' AND (P.p_leader LIKE '%{$u_id}%' OR TU.tu_u_id = '{$u_id}')
                 ORDER BY P.p_name ASC")->getResultArray();
@@ -1144,7 +1149,7 @@ class Home extends BaseController
         $this->view_data['active_projects'] = [];
         $this->view_data['active_tasks'] = [];
         $this->view_data['leaves'] = [];
-        $this->view_data['priorities'] = ['Urgent', 'High', 'Medium', 'Low'];
+        $this->view_data['priorities'] = range(1, 20);
         $this->view_data['return_url'] = $_SERVER['HTTP_REFERER'] ?? base_url('home/tasks');
         $this->view_data['page'] = 'task';
         $this->view_data['meta_title'] = 'Add Task';

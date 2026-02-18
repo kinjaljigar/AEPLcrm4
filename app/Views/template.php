@@ -569,6 +569,12 @@ if (isset($view_data['plugins'])) {
                         case 'Dependency':
                             window.open('<?= base_url("home/dependencies") ?>', '_blank');
                             break;
+                        case 'Message':
+                            window.open('<?= base_url("meeting") ?>', '_blank');
+                            break;
+                        case 'Leave':
+                            window.open('<?= base_url("home/leaves") ?>', '_blank');
+                            break;
                         default:
                             console.warn('Unknown screen_name:', payload.screen_name);
                     }

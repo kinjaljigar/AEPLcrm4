@@ -17,6 +17,7 @@ class Schedule extends BaseController
         $this->view_data['schedules'] = [];
         $this->view_data['search'] = $search;
         $this->view_data['dataURL'] = $dataURL;
+        $this->view_data['type'] = $request->getPost('type') ?? 'mydata';
         return view('template', ['view_data' => $this->view_data]);
     }
 
@@ -26,6 +27,9 @@ class Schedule extends BaseController
         $this->view_data['meta_title'] = 'Add Schedule';
         $this->view_data['admin_session'] = $this->admin_session;
         $this->view_data['authorization'] = $this->authorization;
+        $this->view_data['timeslots'] = [];
+        $this->view_data['token'] = session()->get('token') ?? '';
+        $this->view_data['cliBaseUrl'] = '';
         return view('template', ['view_data' => $this->view_data]);
     }
 
