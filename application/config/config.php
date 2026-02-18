@@ -521,5 +521,5 @@ $config['rewrite_short_tags'] = FALSE;
 | Array:		array('10.0.1.200', '192.168.5.0/24')
 */
 $config['proxy_ips'] = '';
-$config['cli_base_url'] = 'http://localhost/aashirmob/public/v1/';//'http://aashirmob.dummyproject.com/public/v1/';//'http://localhost/aashirmob/public/v1/';
-//$config['cli_base_url'] = 'https://crmapi.aashir.com/public/index.php/v1/';
+//$config['cli_base_url'] = 'http://localhost/aashirmob/public/v1/';//'http://aashirmob.dummyproject.com/public/v1/';//'http://localhost/aashirmob/public/v1/';
+$config['cli_base_url'] = 'https://crmapi.aashir.com/public/index.php/v1/';

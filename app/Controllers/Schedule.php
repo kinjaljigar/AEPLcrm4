@@ -57,4 +57,35 @@ class Schedule extends BaseController
     {
         return redirect()->to('schedule');
     }
+
+    public function updateSchedule()
+    {
+        ob_end_clean();
+        $date = $this->request->getPost('date');
+
+        $url = 'schedule/timeslots/' . $date;
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $this->cliBaseUrl . $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $this->token,
+        ]);
+        $response = curl_exec($ch);
+        if (curl_errno($ch)) {
+            log_message('error', 'cURL error: ' . curl_error($ch));
+            $response = json_encode([]);
+        }
+        curl_close($ch);
+
+        $apiResponse = json_decode($response, true);
+        $timeslots = $apiResponse['availableslots'] ?? [];
+
+        header('Content-Type: application/json');
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'schedule updated successfully',
+            'api_response' => ['timeslots' => $timeslots]
+        ]);
+        exit;
+    }
 }

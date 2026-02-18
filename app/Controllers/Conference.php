@@ -68,4 +68,36 @@ class Conference extends BaseController
         $this->view_data['timeslots'] = [];
         return view('template', ['view_data' => $this->view_data]);
     }
+
+    public function updateConference()
+    {
+        ob_end_clean();
+        $date = $this->request->getPost('date');
+        $room_id = $this->request->getPost('room_id');
+
+        $url = 'conference/timeslots/' . $date . '/' . $room_id;
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $this->cliBaseUrl . $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $this->token,
+        ]);
+        $response = curl_exec($ch);
+        if (curl_errno($ch)) {
+            log_message('error', 'cURL error: ' . curl_error($ch));
+            $response = json_encode([]);
+        }
+        curl_close($ch);
+
+        $apiResponse = json_decode($response, true);
+        $timeslots = $apiResponse['availableslots'] ?? [];
+
+        header('Content-Type: application/json');
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Conference updated successfully',
+            'api_response' => ['timeslots' => $timeslots]
+        ]);
+        exit;
+    }
 }

@@ -9,6 +9,8 @@ use App\Models\MessageModel;
 use App\Models\WeeklyworkModel;
 use App\Models\DependencyModel;
 use App\Models\ProjectMessageModel;
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 
 class Home extends BaseController
 {
@@ -218,8 +220,52 @@ class Home extends BaseController
 
                         $this->session->set('admin_session', $admin_session);
 
-                        // Generate token (simple version, enhance with JWT if needed)
-                        $token = bin2hex(random_bytes(32));
+                        // Generate JWT token for users with app auth or Project Leader
+                        $token = '';
+                        $isProjectLeader = ($user['u_type'] === 'Project Leader');
+                        $canProceed = $isProjectLeader || (!empty($user['u_app_auth']) && $user['u_app_auth'] == 1);
+
+                        if ($canProceed) {
+                            $db = \Config\Database::connect();
+                            $jwtKey = 'af0e4b7ca1c8e091fb9a781c9a2b5f07340ea4d88f96a3b5b1b9927710460f1a';
+                            $issuedAt = time();
+                            $expirationTime = $issuedAt + (7 * 24 * 60 * 60); // 7 days
+                            $payload = [
+                                'iat' => $issuedAt,
+                                'exp' => $expirationTime,
+                                'u_id' => $user['u_id'],
+                                'u_type' => $user['u_type'],
+                            ];
+
+                            $record_token = $db->table('aa_user_tokens')
+                                ->where('u_id', $user['u_id'])
+                                ->get()->getResultArray();
+
+                            if (empty($record_token)) {
+                                $token = JWT::encode($payload, $jwtKey, 'HS256');
+                                $db->table('aa_user_tokens')->insert([
+                                    'u_id' => $user['u_id'],
+                                    'token' => $token,
+                                    'created_at' => date('Y-m-d H:i:s'),
+                                    'expires_at' => date('Y-m-d H:i:s', $expirationTime)
+                                ]);
+                            } else {
+                                $existing_token = $record_token[0]['token'] ?? '';
+                                $expires_at = new \DateTime($record_token[0]['expires_at'] ?? '1970-01-01 00:00:00');
+                                $now = new \DateTime();
+                                if ($now > $expires_at) {
+                                    $token = JWT::encode($payload, $jwtKey, 'HS256');
+                                    $db->table('aa_user_tokens')->where('u_id', $user['u_id'])->update([
+                                        'token' => $token,
+                                        'created_at' => date('Y-m-d H:i:s'),
+                                        'expires_at' => date('Y-m-d H:i:s', $expirationTime)
+                                    ]);
+                                } else {
+                                    $token = $existing_token;
+                                }
+                            }
+                        }
+
                         $this->session->set('token', $token);
 
                         // Return JSON response for AJAX

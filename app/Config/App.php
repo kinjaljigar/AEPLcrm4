@@ -207,5 +207,5 @@ class App extends BaseConfig
      *
      * URL for CLI-based API calls
      */
-    public string $cliBaseUrl = 'http://localhost/AEPLcrm4/public/v1/';
+    public string $cliBaseUrl = 'https://crmapi.aashir.com/public/index.php/v1/';
 }
