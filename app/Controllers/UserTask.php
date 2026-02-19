@@ -16,7 +16,7 @@ class UserTask extends BaseController
 
         $result  = $this->callExternalApi($endpoint);
         $decoded = json_decode($result['body'], true);
-        $tasks   = $decoded['data'] ?? [];
+        $tasks   = $decoded ?? [];
 
         $this->view_data['page']          = 'company/user/task/list';
         $this->view_data['meta_title']    = 'Aashir Connect';
@@ -33,6 +33,17 @@ class UserTask extends BaseController
         $result  = $this->callExternalApi('task/edit/' . $id);
         $decoded = json_decode($result['body'], true);
         $task    = $decoded['task'] ?? $decoded['data'] ?? [];
+
+        // Ensure attachment URLs are absolute (prepend aashirmob base if relative)
+        if (!empty($task['attachments']) && is_array($task['attachments'])) {
+            $assetBase = str_replace('v1/', '', config('App')->cliBaseUrl);
+            foreach ($task['attachments'] as &$file) {
+                if (strpos($file, 'http') !== 0) {
+                    $file = $assetBase . $file;
+                }
+            }
+            unset($file);
+        }
 
         $this->view_data['page']          = 'company/user/task/view';
         $this->view_data['meta_title']    = 'View Task';
@@ -63,20 +74,21 @@ class UserTask extends BaseController
 
     public function addData()
     {
-        $files = $this->request->getFiles('attachments') ?? [];
+        $files = $this->request->getFileMultiple('attachments') ?? [];
 
+        $userIds = $this->request->getPost('user_ids') ?? [];
         $data = [
             'title'       => $this->request->getPost('title'),
             'description' => $this->request->getPost('description'),
             'date'        => $this->request->getPost('date'),
             'time'        => $this->request->getPost('time'),
-            'user_ids'    => json_encode($this->request->getPost('user_ids') ?? []),
+            'user_ids'    => is_array($userIds) ? implode(',', $userIds) : $userIds,
         ];
 
         // Add file attachments as CURLFile objects
         if (!empty($files)) {
             foreach ($files as $index => $file) {
-                if ($file->isValid() && !$file->hasMoved()) {
+                if (is_object($file) && $file->isValid() && !$file->hasMoved()) {
                     $data['attachments[' . $index . ']'] = new \CURLFile(
                         $file->getTempName(),
                         $file->getMimeType(),
@@ -92,7 +104,7 @@ class UserTask extends BaseController
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('usertask');
         }
-        session()->setFlashdata('error', $decoded['message'] ?? 'Failed to add task.');
+        session()->setFlashdata('error_message', $decoded['message'] ?? 'Failed to add task.');
         return redirect()->to('usertask/add');
     }
 
@@ -101,6 +113,17 @@ class UserTask extends BaseController
         $result  = $this->callExternalApi('task/edit/' . $id);
         $decoded = json_decode($result['body'], true);
         $task    = $decoded['task'] ?? $decoded['data'] ?? [];
+
+        // Ensure attachment URLs are absolute (prepend aashirmob base if relative)
+        if (!empty($task['attachments']) && is_array($task['attachments'])) {
+            $assetBase = str_replace('v1/', '', config('App')->cliBaseUrl);
+            foreach ($task['attachments'] as &$file) {
+                if (strpos($file, 'http') !== 0) {
+                    $file = $assetBase . $file;
+                }
+            }
+            unset($file);
+        }
 
         // Fetch company users for assignment dropdown
         $usersResult  = $this->callExternalApi('company/user/list?page=1&limit=1000');
@@ -122,20 +145,22 @@ class UserTask extends BaseController
 
     public function update($id)
     {
-        $files = $this->request->getFiles('attachments') ?? [];
+        $files = $this->request->getFileMultiple('attachments') ?? [];
 
+        $userIds = $this->request->getPost('user_ids') ?? [];
+        $deleteAttachments = $this->request->getPost('delete_attachments') ?? [];
         $data = [
             'title'              => $this->request->getPost('title'),
             'description'        => $this->request->getPost('description'),
             'date'               => $this->request->getPost('date'),
             'time'               => $this->request->getPost('time'),
-            'user_ids'           => json_encode($this->request->getPost('user_ids') ?? []),
-            'delete_attachments' => $this->request->getPost('delete_attachments') ?? [],
+            'user_ids'           => is_array($userIds) ? implode(',', $userIds) : $userIds,
+            'delete_attachments' => is_array($deleteAttachments) ? implode(',', $deleteAttachments) : $deleteAttachments,
         ];
 
         if (!empty($files)) {
             foreach ($files as $index => $file) {
-                if ($file->isValid() && !$file->hasMoved()) {
+                if (is_object($file) && $file->isValid() && !$file->hasMoved()) {
                     $data['attachments[' . $index . ']'] = new \CURLFile(
                         $file->getTempName(),
                         $file->getMimeType(),
@@ -151,7 +176,7 @@ class UserTask extends BaseController
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('usertask');
         }
-        session()->setFlashdata('error', $decoded['message'] ?? 'Failed to update task.');
+        session()->setFlashdata('error_message', $decoded['message'] ?? 'Failed to update task.');
         return redirect()->to('usertask/edit/' . $id);
     }
 
@@ -174,15 +199,13 @@ class UserTask extends BaseController
         $result  = $this->callExternalApi($endpoint);
         $decoded = json_decode($result['body'], true);
 
-        while (ob_get_level() > 0) { ob_end_clean(); }
-        header('Content-Type: application/json');
-        echo json_encode([
-            'tasks'       => $decoded['data'] ?? [],
-            'search'      => $search,
-            'dataURL'     => $dataURL,
+        $view_data = [
+            'tasks'         => $decoded ?? [],
             'admin_session' => $this->admin_session,
-        ]);
-        exit;
+            'dataURL'       => $dataURL,
+        ];
+
+        return view('company/user/task/task_table_partial', ['view_data' => $view_data]);
     }
 
     public function status($id)

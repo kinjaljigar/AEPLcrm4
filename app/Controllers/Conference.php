@@ -16,7 +16,7 @@ class Conference extends BaseController
 
         $result = $this->callExternalApi($endpoint);
         $decoded = json_decode($result['body'], true);
-        $conferences = $decoded['data'] ?? [];
+        $conferences = $decoded ?? [];
 
         $this->view_data['page']          = 'conference/list';
         $this->view_data['meta_title']    = 'Conferences';
@@ -47,12 +47,13 @@ class Conference extends BaseController
 
     public function addData()
     {
+        $timeslotIds = $this->request->getPost('timeslot_id');
         $data = [
             'title'       => $this->request->getPost('title'),
             'description' => $this->request->getPost('description'),
             'date'        => $this->request->getPost('date'),
             'room_id'     => $this->request->getPost('room_id'),
-            'timeslot_id' => $this->request->getPost('timeslot_id'),
+            'timeslot_id' => is_array($timeslotIds) ? implode(',', $timeslotIds) : $timeslotIds,
         ];
 
         $result  = $this->callExternalApi('conference/add', 'POST', $data);
@@ -61,7 +62,7 @@ class Conference extends BaseController
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('conference');
         }
-        session()->setFlashdata('error', $decoded['message'] ?? 'Failed to add conference.');
+        session()->setFlashdata('error_message', $decoded['message'] ?? 'Failed to add conference.');
         return redirect()->to('conference/add');
     }
 
@@ -69,11 +70,12 @@ class Conference extends BaseController
     {
         $result  = $this->callExternalApi('conference/edit/' . $id);
         $decoded = json_decode($result['body'], true);
-        $conference = $decoded['data'] ?? [];
+        $conference = $decoded ?? [];
 
         // Fetch timeslots for the conference date
-        $date = $conference['date'] ?? date('Y-m-d');
-        $tsResult  = $this->callExternalApi('conference/timeslots/' . $date . '/' . ($conference['room_id'] ?? ''));
+        $confData = $decoded['data'] ?? [];
+        $date = $confData['date'] ?? date('Y-m-d');
+        $tsResult  = $this->callExternalApi('conference/timeslots/' . $date . '/' . ($confData['room_id'] ?? ''));
         $tsDecoded = json_decode($tsResult['body'], true);
         $timeslots = $tsDecoded['availableslots'] ?? [];
 
@@ -90,12 +92,13 @@ class Conference extends BaseController
 
     public function update($id)
     {
+        $timeslotIds = $this->request->getPost('timeslot_id');
         $data = [
             'title'       => $this->request->getPost('title'),
             'description' => $this->request->getPost('description'),
             'date'        => $this->request->getPost('date'),
             'room_id'     => $this->request->getPost('room_id'),
-            'timeslot_id' => $this->request->getPost('timeslot_id'),
+            'timeslot_id' => is_array($timeslotIds) ? implode(',', $timeslotIds) : $timeslotIds,
         ];
 
         $result  = $this->callExternalApi('conference/update/' . $id, 'PUT', $data);
@@ -104,7 +107,7 @@ class Conference extends BaseController
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('conference');
         }
-        session()->setFlashdata('error', $decoded['message'] ?? 'Failed to update conference.');
+        session()->setFlashdata('error_message', $decoded['message'] ?? 'Failed to update conference.');
         return redirect()->to('conference/edit/' . $id);
     }
 
@@ -118,7 +121,7 @@ class Conference extends BaseController
     {
         $result  = $this->callExternalApi('conference/edit/' . $id);
         $decoded = json_decode($result['body'], true);
-        $conference = $decoded['data'] ?? [];
+        $conference = $decoded ?? [];
 
         $tsResult  = $this->callExternalApi('conference/timeslots');
         $tsDecoded = json_decode($tsResult['body'], true);

@@ -15,7 +15,7 @@ class Company extends BaseController
 
         $result    = $this->callExternalApi($endpoint);
         $decoded   = json_decode($result['body'], true);
-        $companies = $decoded['data'] ?? [];
+        $companies = $decoded ?? [];
 
         $this->view_data['page']          = 'company/list';
         $this->view_data['meta_title']    = 'Companies';
@@ -58,7 +58,7 @@ class Company extends BaseController
     {
         $result  = $this->callExternalApi('company/edit/' . $id);
         $decoded = json_decode($result['body'], true);
-        $company = $decoded['data'] ?? [];
+        $company = $decoded ?? [];
 
         $this->view_data['page']          = 'company/edit';
         $this->view_data['meta_title']    = 'Edit Company';

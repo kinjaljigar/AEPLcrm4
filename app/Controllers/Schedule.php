@@ -18,7 +18,7 @@ class Schedule extends BaseController
 
         $result    = $this->callExternalApi($endpoint);
         $decoded   = json_decode($result['body'], true);
-        $schedules = $decoded['data'] ?? [];
+        $schedules = $decoded ?? [];
 
         $this->view_data['page']          = 'schedule/list';
         $this->view_data['meta_title']    = 'Schedules';
@@ -50,12 +50,13 @@ class Schedule extends BaseController
 
     public function addData()
     {
+        $timeslotIds = $this->request->getPost('timeslot_id');
         $data = [
             'title'        => $this->request->getPost('title'),
             'description'  => $this->request->getPost('description'),
             'date'         => $this->request->getPost('date'),
             'shedule_type' => $this->request->getPost('shedule_type'),
-            'timeslot_id'  => $this->request->getPost('timeslot_id'),
+            'timeslot_id'  => is_array($timeslotIds) ? implode(',', $timeslotIds) : $timeslotIds,
         ];
 
         $result  = $this->callExternalApi('schedule/add', 'POST', $data);
@@ -64,7 +65,7 @@ class Schedule extends BaseController
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('schedule');
         }
-        session()->setFlashdata('error', $decoded['message'] ?? 'Failed to add schedule.');
+        session()->setFlashdata('error_message', $decoded['message'] ?? 'Failed to add schedule.');
         return redirect()->to('schedule/add');
     }
 
@@ -72,10 +73,11 @@ class Schedule extends BaseController
     {
         $result  = $this->callExternalApi('schedule/edit/' . $id);
         $decoded = json_decode($result['body'], true);
-        $schedule = $decoded['data'] ?? [];
+        $schedule = $decoded ?? [];
 
         // Fetch timeslots for the schedule date
-        $date = $schedule['date'] ?? date('Y-m-d');
+        $schedData = $decoded['data'] ?? [];
+        $date = $schedData['date'] ?? date('Y-m-d');
         $tsResult  = $this->callExternalApi('schedule/timeslots/' . $date);
         $tsDecoded = json_decode($tsResult['body'], true);
         $timeslots = $tsDecoded['availableslots'] ?? [];
@@ -93,12 +95,13 @@ class Schedule extends BaseController
 
     public function update($id)
     {
+        $timeslotIds = $this->request->getPost('timeslot_id');
         $data = [
             'title'        => $this->request->getPost('title'),
             'description'  => $this->request->getPost('description'),
             'date'         => $this->request->getPost('date'),
             'shedule_type' => $this->request->getPost('shedule_type'),
-            'timeslot_id'  => $this->request->getPost('timeslot_id'),
+            'timeslot_id'  => is_array($timeslotIds) ? implode(',', $timeslotIds) : $timeslotIds,
         ];
 
         $result  = $this->callExternalApi('schedule/update/' . $id, 'PUT', $data);
@@ -107,8 +110,30 @@ class Schedule extends BaseController
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('schedule');
         }
-        session()->setFlashdata('error', $decoded['message'] ?? 'Failed to update schedule.');
+        session()->setFlashdata('error_message', $decoded['message'] ?? 'Failed to update schedule.');
         return redirect()->to('schedule/edit/' . $id);
+    }
+
+    public function view($id)
+    {
+        $result  = $this->callExternalApi('schedule/edit/' . $id);
+        $decoded = json_decode($result['body'], true);
+        $schedule = $decoded ?? [];
+
+        $date = $decoded['data']['date'] ?? date('Y-m-d');
+        $tsResult  = $this->callExternalApi('schedule/timeslots/' . $date);
+        $tsDecoded = json_decode($tsResult['body'], true);
+        $timeslots = $tsDecoded['availableslots'] ?? [];
+
+        $this->view_data['page']          = 'schedule/view';
+        $this->view_data['meta_title']    = 'View Schedule';
+        $this->view_data['admin_session'] = $this->admin_session;
+        $this->view_data['authorization'] = $this->authorization;
+        $this->view_data['schedule']      = $schedule;
+        $this->view_data['timeslots']     = $timeslots;
+        $this->view_data['token']         = $this->token ?? '';
+        $this->view_data['cliBaseUrl']    = $this->cliBaseUrl;
+        return view('template', ['view_data' => $this->view_data]);
     }
 
     public function delete($id)

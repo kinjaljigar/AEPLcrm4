@@ -107,7 +107,9 @@ $routes->post('conference/update/(:num)', 'Conference::update/$1');
 $routes->get('conference/delete/(:num)', 'Conference::delete/$1');
 $routes->get('conference/view/(:num)', 'Conference::view/$1');
 $routes->post('conference/updateConference', 'Conference::updateConference');
+$routes->post('conference/updateconference', 'Conference::updateConference');
 $routes->post('ConferenceController/updateConference', 'Conference::updateConference');
+$routes->post('conferencecontroller/updateconference', 'Conference::updateConference');
 
 $routes->get('schedule', 'Schedule::index');
 $routes->get('schedule/add', 'Schedule::add');
@@ -115,9 +117,12 @@ $routes->post('schedule/add', 'Schedule::addData');
 $routes->post('schedule/addData', 'Schedule::addData');
 $routes->get('schedule/edit/(:num)', 'Schedule::edit/$1');
 $routes->post('schedule/update/(:num)', 'Schedule::update/$1');
+$routes->get('schedule/view/(:num)', 'Schedule::view/$1');
 $routes->get('schedule/delete/(:num)', 'Schedule::delete/$1');
 $routes->post('schedule/updateSchedule', 'Schedule::updateSchedule');
+$routes->post('schedule/updateschedule', 'Schedule::updateSchedule');
 $routes->post('ScheduleController/updateSchedule', 'Schedule::updateSchedule');
+$routes->post('schedulecontroller/updateschedule', 'Schedule::updateSchedule');
 
 $routes->get('company', 'Company::index');
 $routes->get('company/add', 'Company::add');

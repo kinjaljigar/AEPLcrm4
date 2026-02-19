@@ -116,25 +116,21 @@ $timeslots = $view_data['timeslots'];
                     },
                     dataType: 'json',
                     success: function(response) {
-                        // Handle success response
                         console.log('API called successfully', response);
                         const preSelectedIds = <?php echo json_encode($conference['time_slots_ids']); ?>;
-                        // Assuming the response contains the available timeslots
+                        $('#timeslot_id').empty();
                         if (response.api_response && response.api_response.timeslots) {
-                            var timeslotOptions = '';
                             $.each(response.api_response.timeslots, function(index, timeslot) {
                                 const isSelected = preSelectedIds.includes(timeslot.id.toString()) ? 'selected' : '';
                                 const isDisabled = timeslot.is_booked && !preSelectedIds.includes(timeslot.id.toString()) ? 'disabled' : '';
-                                //timeslotOptions += '<option value="' + timeslot.id + '" ${isDisabled} ${isSelected}>' + timeslot.value + '</option>';
                                 const option = `
         <option value="${timeslot.id}" ${isDisabled} ${isSelected}>
             ${timeslot.value} ${timeslot.is_booked ? '(Booked by: ' + (timeslot.booked_by.length ? timeslot.booked_by.join(', ') : 'N/A') + ')' : ''}
         </option>`;
                                 $('#timeslot_id').append(option);
                             });
-                            //$('#timeslot_id').html(timeslotOptions); // Update the timeslot dropdown
                         } else {
-                            console.log('No timeslots available');
+                            $('#timeslot_id').html('<option value="">No timeslots available</option>');
                         }
                     },
                     error: function(xhr, status, error) {

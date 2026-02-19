@@ -15,7 +15,7 @@ class CompanyUser extends BaseController
 
         $result      = $this->callExternalApi($endpoint);
         $decoded     = json_decode($result['body'], true);
-        $companyUsers = $decoded['data'] ?? $decoded['allusers'] ?? [];
+        $companyUsers = $decoded ?? [];
 
         $this->view_data['page']          = 'company/user/list';
         $this->view_data['meta_title']    = 'Associate Users';
@@ -49,6 +49,7 @@ class CompanyUser extends BaseController
 
     public function addData()
     {
+        $projectIds = $this->request->getPost('project_ids') ?? [];
         $data = [
             'name'        => $this->request->getPost('name'),
             'mobile'      => $this->request->getPost('mobile'),
@@ -57,7 +58,7 @@ class CompanyUser extends BaseController
             'password'    => $this->request->getPost('password'),
             'status'      => $this->request->getPost('status'),
             'company_id'  => $this->request->getPost('company_id'),
-            'project_ids' => $this->request->getPost('project_ids') ?? [],
+            'project_ids' => is_array($projectIds) ? implode(',', $projectIds) : $projectIds,
         ];
 
         $result  = $this->callExternalApi('company/add-user', 'POST', $data);
@@ -66,7 +67,7 @@ class CompanyUser extends BaseController
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('companyuser');
         }
-        session()->setFlashdata('error', $decoded['message'] ?? 'Failed to add company user.');
+        session()->setFlashdata('error_message', $decoded['message'] ?? 'Failed to add company user.');
         return redirect()->to('companyuser/add');
     }
 
@@ -96,6 +97,7 @@ class CompanyUser extends BaseController
 
     public function update($id)
     {
+        $projectIds = $this->request->getPost('project_ids') ?? [];
         $data = [
             'name'        => $this->request->getPost('name'),
             'mobile'      => $this->request->getPost('mobile'),
@@ -104,7 +106,7 @@ class CompanyUser extends BaseController
             'password'    => $this->request->getPost('password'),
             'status'      => $this->request->getPost('status'),
             'company_id'  => $this->request->getPost('company_id'),
-            'project_ids' => $this->request->getPost('project_ids') ?? [],
+            'project_ids' => is_array($projectIds) ? implode(',', $projectIds) : $projectIds,
         ];
 
         $result  = $this->callExternalApi('company/update/user/' . $id, 'PUT', $data);
@@ -113,7 +115,7 @@ class CompanyUser extends BaseController
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('companyuser');
         }
-        session()->setFlashdata('error', $decoded['message'] ?? 'Failed to update company user.');
+        session()->setFlashdata('error_message', $decoded['message'] ?? 'Failed to update company user.');
         return redirect()->to('companyuser/edit/' . $id);
     }
 
