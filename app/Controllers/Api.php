@@ -60,10 +60,9 @@ class Api extends BaseController
                         ]);
                     }
 
-                    // Generate JWT token for users with app auth or Project Leader
+                    // Fetch or generate JWT token for users with u_app_auth = 1
                     $token = '';
-                    $isProjectLeader = ($user['u_type'] === 'Project Leader');
-                    $canProceed = $isProjectLeader || (!empty($user['u_app_auth']) && $user['u_app_auth'] == 1);
+                    $canProceed = !empty($user['u_app_auth']) && $user['u_app_auth'] == 1;
 
                     if ($canProceed) {
                         $db = \Config\Database::connect();
@@ -82,6 +81,7 @@ class Api extends BaseController
                             ->get()->getResultArray();
 
                         if (empty($record_token)) {
+                            // No token exists — create one
                             $token = JWT::encode($payload, $jwtKey, 'HS256');
                             $db->table('aa_user_tokens')->insert([
                                 'u_id' => $user['u_id'],
@@ -92,8 +92,8 @@ class Api extends BaseController
                         } else {
                             $existing_token = $record_token[0]['token'] ?? '';
                             $expires_at = new \DateTime($record_token[0]['expires_at'] ?? '1970-01-01 00:00:00');
-                            $now = new \DateTime();
-                            if ($now > $expires_at) {
+                            if (new \DateTime() > $expires_at) {
+                                // Token expired — regenerate
                                 $token = JWT::encode($payload, $jwtKey, 'HS256');
                                 $db->table('aa_user_tokens')->where('u_id', $user['u_id'])->update([
                                     'token' => $token,
@@ -101,6 +101,7 @@ class Api extends BaseController
                                     'expires_at' => date('Y-m-d H:i:s', $expirationTime)
                                 ]);
                             } else {
+                                // Reuse existing valid token (mobile app depends on this)
                                 $token = $existing_token;
                             }
                         }

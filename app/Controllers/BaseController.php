@@ -166,4 +166,62 @@ abstract class BaseController extends Controller
             }
         }
     }
+
+    /**
+     * Make a cURL call to the external API (cliBaseUrl).
+     *
+     * @param string $endpoint  e.g. 'conference/list'
+     * @param string $method    GET | POST | PUT | DELETE
+     * @param array  $data      Form/JSON data to send
+     * @param bool   $jsonBody  Send $data as JSON body (for PUT/POST JSON)
+     * @param bool   $multipart Send as multipart (file uploads)
+     * @return array ['code' => int, 'body' => string, 'error' => string]
+     */
+    protected function callExternalApi(string $endpoint, string $method = 'GET', array $data = [], bool $jsonBody = false, bool $multipart = false): array
+    {
+        $url = $this->cliBaseUrl . $endpoint;
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+
+        $headers = [
+            'Authorization: Bearer ' . $this->token,
+            'Accept: application/json',
+        ];
+
+        $method = strtoupper($method);
+        if ($method === 'GET') {
+            curl_setopt($ch, CURLOPT_HTTPGET, true);
+        } elseif ($method === 'POST') {
+            curl_setopt($ch, CURLOPT_POST, true);
+            if ($jsonBody) {
+                $headers[] = 'Content-Type: application/json';
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+            } else {
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+            }
+        } elseif ($method === 'PUT') {
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
+            $headers[] = 'Content-Type: application/json';
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        } elseif ($method === 'DELETE') {
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
+        }
+
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        $body = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($error) {
+            log_message('error', 'API cURL error [' . $method . ' ' . $url . ']: ' . $error);
+        }
+        if ($code !== 200) {
+            log_message('error', 'API HTTP ' . $code . ' [' . $method . ' ' . $url . ']: ' . $body);
+        }
+
+        return ['code' => $code, 'body' => $body, 'error' => $error];
+    }
 }

@@ -94,6 +94,9 @@ $routes->get('home/report_project_employee', 'Home::report_project_employee');
 $routes->get('home/report_profitloss', 'Home::report_profitloss');
 $routes->post('home/report_timesheet', 'Home::report_timesheet');
 
+// Debug: test token + cliBaseUrl (remove after fixing)
+$routes->get('debug/apitest', 'Conference::debugApiTest');
+
 // Conference and Schedule routes
 $routes->get('conference', 'Conference::index');
 $routes->get('conference/add', 'Conference::add');
