@@ -18,11 +18,11 @@ $token = $view_data['token'];
                 </div>
             </div>
             <div class="box-body">
-                <?php if (session()->getFlashdata('error_message')): ?>
+                <?php $flashError = session()->getFlashdata('error_message'); ?>
+                <?php if ($flashError): ?>
                     <div class="alert alert-danger">
-                        <?= htmlspecialchars(session()->getFlashdata('error_message')) ?>
+                        <?= htmlspecialchars(is_array($flashError) ? implode(', ', array_values($flashError)) : $flashError) ?>
                     </div>
-                    <?php session()->remove('error_message'); ?>
                 <?php endif; ?>
                 <form action="<?php echo site_url('company/addData/'); ?>" method="post">
                     <div class="form-group">

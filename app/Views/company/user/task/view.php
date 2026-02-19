@@ -18,11 +18,11 @@
                 </div>
             </div>
             <div class="box-body">
-                <?php if (session()->getFlashdata('error_message')): ?>
+                <?php $flashError = session()->getFlashdata('error_message'); ?>
+                <?php if ($flashError): ?>
                     <div class="alert alert-danger">
-                        <?= htmlspecialchars(session()->getFlashdata('error_message')) ?>
+                        <?= htmlspecialchars(is_array($flashError) ? implode(', ', array_values($flashError)) : $flashError) ?>
                     </div>
-                    <?php session()->remove('error_message'); ?>
                 <?php endif; ?>
 
                 <div class="form-group">
