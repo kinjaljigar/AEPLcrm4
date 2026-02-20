@@ -1286,7 +1286,10 @@ class Api extends BaseController
 
         // Apply filters
         if (!empty($txt_search)) {
-            $builder->like('P.p_number', $txt_search);
+            $builder->groupStart()
+                ->like('P.p_number', $txt_search)
+                ->orLike('P.p_name', $txt_search)
+            ->groupEnd();
         }
 
         if (!empty($txt_p_cat)) {
@@ -1537,6 +1540,9 @@ class Api extends BaseController
         if (!empty($txt_U_Status)) {
             $builder->where('u_status', $txt_U_Status);
         }
+        else {
+                $builder->where('u_status', 'Active');
+        }
 
         // Get total count
         $totalRecords = $builder->countAllResults(false);
@@ -1559,7 +1565,7 @@ class Api extends BaseController
             $actions = '<div class="actions">';
             $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $employee['u_id'] . ', \'' . $admin_session['u_type'] . '\')" class="btn btn-primary btn-xs"><i class="fa fa-edit"></i></a> ';
 
-            if ($admin_session['u_type'] == 'Master Admin') {
+            if ($admin_session['u_type'] == 'Master Admin' || $admin_session['u_type'] == 'Bim Head' || $admin_session['u_type'] == 'Super Admin') {
                 $actions .= '<a href="javascript://" onclick="deleteRecord(' . $employee['u_id'] . ')" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i></a>';
             }
             $actions .= '</div>';
@@ -1693,7 +1699,7 @@ class Api extends BaseController
                         $u_id = $admin_session['u_id'];
                         $u_type = $admin_session['u_type'];
 
-                        if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
+                        if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator', 'MailCoordinator'])) {
                             $builder = $db->table('aa_projects');
                             $builder->select('p_id, p_name, p_number');
                             $builder->where('p_status', 'Active');
@@ -2002,11 +2008,11 @@ class Api extends BaseController
                     exit;
                 }
 
-                $isMasterAdmin = (($admin_session['u_type'] ?? '') === 'Master Admin');
+                $isMasterAdminOrBimHead = in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Bim Head']);
                 $isOwnLeave = ($leave['l_u_id'] == $admin_session['u_id']);
 
-                // Master Admin can delete any leave; creator can delete only if Pending
-                if ($isMasterAdmin || ($isOwnLeave && ($leave['l_status'] ?? '') === 'Pending')) {
+                // Master Admin and Bim Head can delete any leave; creator can delete only if Pending
+                if ($isMasterAdminOrBimHead || ($isOwnLeave && ($leave['l_status'] ?? '') === 'Pending')) {
                     $db->table('aa_leaves')->where('l_id', $l_id)->delete();
                     echo json_encode(['status' => 'pass', 'message' => 'Leave deleted successfully.']);
                 } else {
@@ -2200,8 +2206,8 @@ class Api extends BaseController
                 }
             }
 
-            // Master Admin can delete any leave
-            if (($admin_session['u_type'] ?? '') === 'Master Admin' && !$isCreator) {
+            // Master Admin and Bim Head can delete any leave
+            if (in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Bim Head']) && !$isCreator) {
                 $actions .= '<a href="javascript://" onclick="deleteRecord(' . $leave['l_id'] . ')" class="btn btn-danger btn-xs" title="Delete"><i class="fa fa-trash"></i></a> ';
             }
             $actions .= '</div>';

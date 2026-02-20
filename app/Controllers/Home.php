@@ -692,7 +692,7 @@ class Home extends BaseController
         $u_type = $this->admin_session['u_type'] ?? '';
         $u_id = $this->admin_session['u_id'] ?? '';
 
-        if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
+        if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator', 'MailCoordinator'])) {
             $projects = $db->table('aa_projects')->where('p_status', 'Active')->orderBy('p_name', 'ASC')->get()->getResultArray();
         } elseif ($u_type === 'Project Leader') {
             // Project Leader: only show projects where they are p_leader

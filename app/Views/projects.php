@@ -23,7 +23,7 @@
                 <div class="row">
                     <div class="col-xs-12">
                         Filter: <input class="form-control" name="txt_search" id="txt_search"
-                            style="width:150px; display:inline" placeholder="Project No" />
+                            style="width:150px; display:inline" placeholder="Project No / Name" />
                         <select class="form-control" id="txt_p_cat" name="txt_p_cat" style="width:auto; display:inline">
                             <option value="">All Categories</option>
                             <?php
