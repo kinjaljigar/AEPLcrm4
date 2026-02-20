@@ -252,7 +252,8 @@ class Api extends BaseController
                     ->select('L.*, U.u_name')
                     ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
                     ->where('L.l_status', 'Pending')
-                    ->orderBy('L.l_id', 'DESC');
+                    ->orderBy('L.l_id', 'DESC')
+                    ->limit(5);
 
                 if (!empty($leaderid)) {
                     // For project leaders, show leaves of employees under them
@@ -306,7 +307,8 @@ class Api extends BaseController
                     ->where('L.l_status', 'Approved')
                     ->where('L.l_from_date <=', $today)
                     ->where('L.l_to_date >=', $today)
-                    ->orderBy('U.u_name', 'ASC');
+                    ->orderBy('U.u_name', 'ASC')
+                    ->limit(5);
 
                 if (!empty($leaderid)) {
                     $builder->where('U.u_leader', $leaderid);
@@ -370,7 +372,8 @@ class Api extends BaseController
                     ->join('aa_present P', 'U.u_id = P.pr_u_id')
                     ->where('P.pr_date', $today)
                     ->orderBy('U.u_department', 'ASC')
-                    ->orderBy('U.u_name', 'ASC');
+                    ->orderBy('U.u_name', 'ASC')
+                    ->limit(5);
 
                 $employees = $builder->get()->getResultArray();
                 $data = [];
@@ -396,6 +399,7 @@ class Api extends BaseController
                 $projects = $db->table('aa_projects')
                     ->where('p_show_dashboard', 'Yes')
                     ->orderBy('p_name', 'ASC')
+                    ->limit(5)
                     ->get()->getResultArray();
 
                 $data = [];
@@ -416,6 +420,72 @@ class Api extends BaseController
                         number_format($total_expense, 2),
                         number_format($profit, 2),
                         $project['p_status']
+                    ];
+                }
+
+                echo json_encode([
+                    'draw' => $request->getPost('draw') ?? 1,
+                    'recordsTotal' => count($data),
+                    'recordsFiltered' => count($data),
+                    'data' => $data
+                ]);
+                exit;
+
+            case 'under_watch_all':
+                $projects = $db->table('aa_projects')
+                    ->where('p_show_dashboard', 'Yes')
+                    ->orderBy('p_name', 'ASC')
+                    ->get()->getResultArray();
+
+                $data = [];
+                foreach ($projects as $project) {
+                    $expenses = $db->table('aa_project_expense')
+                        ->selectSum('pe_val')
+                        ->where('pe_p_id', $project['p_id'])
+                        ->get()->getRowArray();
+                    $total_expense = floatval($expenses['pe_val'] ?? 0);
+                    $p_value = floatval($project['p_value'] ?? 0);
+                    $profit = $p_value - $total_expense;
+
+                    $data[] = [
+                        htmlspecialchars($project['p_name']),
+                        !empty($project['p_created']) ? convert_db2display($project['p_created'], false) : '',
+                        number_format($p_value, 2),
+                        number_format($total_expense, 2),
+                        number_format($profit, 2),
+                        $project['p_status']
+                    ];
+                }
+
+                echo json_encode([
+                    'draw' => $request->getPost('draw') ?? 1,
+                    'recordsTotal' => count($data),
+                    'recordsFiltered' => count($data),
+                    'data' => $data
+                ]);
+                exit;
+
+            case 'leavestoday_all':
+                $today = date('Y-m-d');
+                $leaves = $db->table('aa_leaves L')
+                    ->select('L.*, U.u_name, U.u_department')
+                    ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
+                    ->where('L.l_status', 'Approved')
+                    ->where('L.l_from_date <=', $today)
+                    ->where('L.l_to_date >=', $today)
+                    ->orderBy('U.u_name', 'ASC')
+                    ->get()->getResultArray();
+
+                $data = [];
+                foreach ($leaves as $leave) {
+                    $data[] = [
+                        $leave['u_name'] ?? '',
+                        $leave['u_department'] ?? '',
+                        !empty($leave['l_from_date']) ? convert_db2display($leave['l_from_date'], false) : '',
+                        !empty($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '',
+                        ($leave['l_is_halfday'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_halfday_time'] ?? '') . ')' : 'No',
+                        ($leave['l_is_hourly'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_hourly_time'] ?? '') . ')' : 'No',
+                        $leave['l_approved_by'] ?? '',
                     ];
                 }
 
@@ -2198,10 +2268,9 @@ class Api extends BaseController
             }
 
             // Approve/Decline only when Pending
+            // Note: visibility query already ensures Project Leader only sees their own employees' leaves
             if ($isPending) {
-                if ($isAdmin) {
-                    $actions .= '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ')" class="btn btn-success btn-xs" title="Manage"><i class="fa fa-check"></i></a> ';
-                } elseif ($isLeader && !$isCreator && ($leave['u_leader'] ?? '') == $admin_session['u_id']) {
+                if ($isAdmin || ($isLeader && !$isCreator)) {
                     $actions .= '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ')" class="btn btn-success btn-xs" title="Manage"><i class="fa fa-check"></i></a> ';
                 }
             }

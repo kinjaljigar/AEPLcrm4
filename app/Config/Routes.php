@@ -69,6 +69,8 @@ $routes->get('home/empattendance', 'Home::empattendance');
 $routes->get('home/dependency', 'Home::dependency');
 $routes->get('home/dependencies', 'Home::dependencies');
 $routes->get('home/presentlist', 'Home::presentlist');
+$routes->get('home/projectsunderwatch', 'Home::projectsunderwatch');
+$routes->get('home/todayleaves', 'Home::todayleaves');
 $routes->get('home/project_contacts/(:num)', 'Home::project_contacts/$1');
 $routes->get('home/project_detail/(:num)', 'Home::project_detail/$1');
 $routes->get('home/download/(:segment)/(:num)', 'Home::download/$1/$2');

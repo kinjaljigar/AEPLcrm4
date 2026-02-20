@@ -111,7 +111,7 @@ class Home extends BaseController
             $depSql .= " ORDER BY
                 CASE WD.status WHEN 'Pending' THEN 1 WHEN 'In Progress' THEN 2 ELSE 3 END ASC,
                 CASE WD.priority WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 3 ELSE 4 END ASC
-                LIMIT 20";
+                LIMIT 5";
 
             $this->view_data['dependencies'] = $db->query($depSql)->getResultArray();
         } catch (\Exception $e) {
@@ -134,7 +134,7 @@ class Home extends BaseController
                 LEFT JOIN aa_users u ON u.u_id = w.leader_id
                 WHERE 1=1";
             if ($leader_id) $sql .= " AND w.leader_id = " . intval($leader_id);
-            $sql .= " ORDER BY w.w_id DESC LIMIT 20";
+            $sql .= " ORDER BY w.w_id DESC LIMIT 5";
             $this->view_data['weekly_works'] = $db->query($sql)->getResultArray();
         } catch (\Exception $e) {
             log_message('error', 'Dashboard weekly_works error: ' . $e->getMessage());
@@ -1110,6 +1110,26 @@ class Home extends BaseController
         $this->view_data['admin_session'] = $this->admin_session;
         $this->view_data['authorization'] = $this->authorization;
         $this->view_data['plugins'] = ['datatable' => true, 'form_validation' => true];
+        return view('template', ['view_data' => $this->view_data]);
+    }
+
+    public function projectsunderwatch()
+    {
+        $this->view_data['page'] = 'projects_under_watch';
+        $this->view_data['meta_title'] = 'Projects Under Watch';
+        $this->view_data['admin_session'] = $this->admin_session;
+        $this->view_data['authorization'] = $this->authorization;
+        $this->view_data['plugins'] = ['datatable' => true];
+        return view('template', ['view_data' => $this->view_data]);
+    }
+
+    public function todayleaves()
+    {
+        $this->view_data['page'] = 'today_leaves';
+        $this->view_data['meta_title'] = 'Today Employees on Leave';
+        $this->view_data['admin_session'] = $this->admin_session;
+        $this->view_data['authorization'] = $this->authorization;
+        $this->view_data['plugins'] = ['datatable' => true];
         return view('template', ['view_data' => $this->view_data]);
     }
 

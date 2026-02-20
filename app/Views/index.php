@@ -347,7 +347,7 @@
                                         print $conferences['message'];
                                     } else { ?>
                                         <ul>
-                                            <?php foreach ($conferences['data'] as $conference): ?>
+                                            <?php foreach (array_slice($conferences['data'], 0, 5) as $conference): ?>
                                                 <tr>
                                                     <td><?= $conference['title'] ?></td>
                                                     <td><?= $conference['date'] ?></td>
@@ -410,7 +410,7 @@
                                         print $schedules['message'];
                                     } else { ?>
                                         <ul>
-                                            <?php foreach ($schedules['data'] as $schedule): ?>
+                                            <?php foreach (array_slice($schedules['data'], 0, 5) as $schedule): ?>
                                                 <tr>
                                                     <td><?= $schedule['title'] ?></td>
                                                     <td><?= $schedule['date'] ?></td>
@@ -471,7 +471,7 @@
                                     print $tasks['message'];
                                 } else { ?>
                                     <ul>
-                                        <?php foreach ($tasks['data'] as $task): ?>
+                                        <?php foreach (array_slice($tasks['data'], 0, 5) as $task): ?>
                                             <tr>
                                                 <td><?= $task['title'] ?></td>
                                                 <td><?= $task['date'] ?></td>
@@ -679,8 +679,9 @@
                             <div class="col-sm-9">
                                 <h3 class="box-title">Today Employees on leave</h3>
                             </div>
-                            <!-- <div class="col-sm-3"><a href="<?php echo base_url("home/leaves"); ?>"
-                            class="btn btn-primary pull-right">Take Action</a></div> -->
+                            <div class="col-sm-3">
+                                <a href="<?php echo base_url('home/todayleaves'); ?>" class="btn btn-primary pull-right">More</a>
+                            </div>
                         </div>
                     </div>
 
@@ -767,7 +768,14 @@
             <?php if ($view_data['authorization']->is_role_allowed($view_data['admin_session']['u_type'], ['Master Admin'])) { ?>
                 <div class="box box-sbpink">
                     <div class="box-header">
-                        <h3 class="box-title">Projects under watch</h3>
+                        <div class="row">
+                            <div class="col-sm-9">
+                                <h3 class="box-title">Projects under watch</h3>
+                            </div>
+                            <div class="col-sm-3">
+                                <a href="<?php echo base_url('home/projectsunderwatch'); ?>" class="btn btn-primary pull-right">More</a>
+                            </div>
+                        </div>
                     </div>
                     <div class="box-body">
                         <table id="dataTableWatch" class="table table-bordered responsive nowrap" width="100%">
