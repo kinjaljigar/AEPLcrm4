@@ -298,7 +298,7 @@ $users = $view_data['users'];
         if (dataTable != null) dataTable.destroy();
         var logged_role = "<?php echo $view_data['admin_session']['u_type']; ?>";
         var canExport = (logged_role === 'Master Admin' || logged_role === 'Bim Head' || logged_role === 'MailCoordinator');
-        var exportOpts = { columns: [0, 1, 2, 3, 4] }; // exclude col 5 (Action buttons)
+        var exportOpts = { columns: [0, 1, 2, 3, 4], orthogonal: 'filter' }; // exclude col 5 (Action buttons); use raw data not display HTML
         var exportButtons = canExport ? [
             { extend: 'excelHtml5', title: 'Messages', exportOptions: exportOpts },
             { extend: 'csvHtml5',   title: 'Messages', exportOptions: exportOpts },

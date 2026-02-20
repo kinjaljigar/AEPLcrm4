@@ -147,10 +147,10 @@
 
             dom: 'Blfrtip',
             buttons: [
-                { extend: 'excelHtml5', title: 'Message Report' },
-                { extend: 'csvHtml5',   title: 'Message Report' },
-                { extend: 'pdfHtml5',   title: 'Message Report', orientation: 'landscape', pageSize: 'A3' },
-                { extend: 'print',      title: 'Message Report' }
+                { extend: 'excelHtml5', title: 'Message Report', exportOptions: { orthogonal: 'filter' } },
+                { extend: 'csvHtml5',   title: 'Message Report', exportOptions: { orthogonal: 'filter' } },
+                { extend: 'pdfHtml5',   title: 'Message Report', orientation: 'landscape', pageSize: 'A3', exportOptions: { orthogonal: 'filter' } },
+                { extend: 'print',      title: 'Message Report', exportOptions: { orthogonal: 'filter' } }
             ]
         });
     }
