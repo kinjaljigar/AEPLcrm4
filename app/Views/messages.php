@@ -79,7 +79,7 @@ $users = $view_data['users'];
                         <button class="btn btn-primary" onclick="LoadData()">Search</button>
                     </div>
                 </div>
-                <table id="datatable" class="table table-bordered table-hover nowrap" width="100%">
+                <table id="datatable" class="table table-bordered table-hover" width="100%">
                     <thead>
                         <tr>
                             <th>Date</th>
@@ -297,10 +297,14 @@ $users = $view_data['users'];
     function LoadData() {
         if (dataTable != null) dataTable.destroy();
         var logged_role = "<?php echo $view_data['admin_session']['u_type']; ?>";
-        var exportButtons = [];
-        if (logged_role === 'Master Admin' || logged_role === 'Bim Head' || logged_role === 'MailCoordinator') {
-            exportButtons = ['excelHtml5', 'csvHtml5', 'pdfHtml5', 'print'];
-        }
+        var canExport = (logged_role === 'Master Admin' || logged_role === 'Bim Head' || logged_role === 'MailCoordinator');
+        var exportOpts = { columns: [0, 1, 2, 3, 4] }; // exclude col 5 (Action buttons)
+        var exportButtons = canExport ? [
+            { extend: 'excelHtml5', title: 'Messages', exportOptions: exportOpts },
+            { extend: 'csvHtml5',   title: 'Messages', exportOptions: exportOpts },
+            { extend: 'pdfHtml5',   title: 'Messages', orientation: 'landscape', pageSize: 'A3', exportOptions: exportOpts },
+            { extend: 'print',      title: 'Messages', exportOptions: exportOpts }
+        ] : [];
         var ajaxData = {
             act: "list",
             project_id: $("#search_project").val(),
@@ -315,23 +319,46 @@ $users = $view_data['users'];
                 url: "<?php echo base_url('api/projectmessages'); ?>",
                 type: "POST",
                 data: ajaxData
-            }
-
-            ,
+            },
             pageLength: 25,
-            columnDefs: [{
+            columnDefs: [
+                {
                     "targets": [0, 1, 2, 3, 4],
                     "orderable": false
+                },
+                {
+                    "targets": 1,
+                    "width": "210px",
+                    "render": function(data, type, row) {
+                        if (type === 'display' && data) {
+                            var safe = String(data).replace(/"/g, '&quot;');
+                            return '<span title="' + safe + '" style="white-space:normal;word-break:break-word;display:block;max-width:210px;">' + data + '</span>';
+                        }
+                        return data || '';
+                    }
+                },
+                {
+                    "targets": 2,
+                    "width": "320px",
+                    "render": function(data, type, row) {
+                        if (type === 'display' && data) {
+                            var safe = String(data).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            if (data.length > 70) {
+                                var short = data.substr(0, 70);
+                                return '<span style="white-space:normal;word-break:break-word;">' + short +
+                                    '<span data-toggle="tooltip" data-placement="top" data-container="body" title="' + safe + '" style="color:#337ab7;cursor:pointer;font-weight:600;"> ...more</span></span>';
+                            }
+                            return '<span style="white-space:normal;word-break:break-word;">' + data + '</span>';
+                        }
+                        return data || '';
+                    }
                 }
-
             ],
-            "dom": exportButtons.length ? 'Blfrtip' : 'lfrtip',
-            "buttons": [
-                'excelHtml5',
-                'csvHtml5',    
-                'pdfHtml5',        
-                'print'
-            ],
+            "drawCallback": function() {
+                $('[data-toggle="tooltip"]').tooltip({ container: 'body' });
+            },
+            "dom": canExport ? 'Blfrtip' : 'lfrtip',
+            "buttons": exportButtons,
         });
     }
 

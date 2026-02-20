@@ -98,15 +98,8 @@ if (isset($view_data['plugins'])) {
                             <!-- User Account: style can be found in dropdown.less -->
                             <li class="dropdown user user-menu">
                                 <a aria-expanded="false" href="#" class="dropdown-toggle" data-toggle="dropdown">
-
                                     <span class="hidden-xsl"
                                         style="font-weight:bold;font-size:16px;"><?php echo isset($view_data['admin_session']['u_name']) ? "Hi, " . $view_data['admin_session']['u_name'] : ''; ?></span>
-                                </a>
-                            </li>
-                            <li>
-                                <a href="<?= base_url('home/logout') ?>" title="Sign Out" style="padding-top:12px;padding-bottom:12px;">
-                                    <i class="fa fa-sign-out" style="font-size:18px;"></i>
-                                    <span class="hidden-xs" style="margin-left:4px;">Sign Out</span>
                                 </a>
                             </li>
                         </ul>

@@ -60,7 +60,7 @@ $friday = date('Y-m-d', strtotime('friday this week'));
             <div class="box-body">
                 <div class="row">
                     <div class="col-md-12">
-                        <table id="project_table" class="table table-bordered table-hover responsive nowrap" width="100%">
+                        <table id="project_table" class="table table-bordered table-hover responsive" width="100%">
                             <thead>
                                 <tr>
                                     <th>Leader</th>
@@ -240,15 +240,38 @@ $friday = date('Y-m-d', strtotime('friday this week'));
             stripeClasses: ['r0', 'r1'],
             bSort: false,
             dom: 'Blfrtip',
-            "buttons": true,
+            "buttons": [
+                {
+                    extend: 'excelHtml5',
+                    title: 'Project Weekly Data',
+                    exportOptions: { columns: [0,1,2,3,4,5,6,7,8,9] }
+                },
+                {
+                    extend: 'csvHtml5',
+                    title: 'Project Weekly Data',
+                    exportOptions: { columns: [0,1,2,3,4,5,6,7,8,9] }
+                },
+                {
+                    extend: 'pdfHtml5',
+                    title: 'Project Weekly Data',
+                    orientation: 'landscape',
+                    pageSize: 'A3',
+                    exportOptions: { columns: [0,1,2,3,4,5,6,7,8,9] }
+                },
+                {
+                    extend: 'print',
+                    title: 'Project Weekly Data',
+                    exportOptions: { columns: [0,1,2,3,4,5,6,7,8,9] }
+                }
+            ],
             //"searching": true,
             "columnDefs": [
-
                 {
-                    "targets": [0, 8],
+                    "targets": [0, 1, 2, 4, 5, 6, 7, 8, 9, 10],
                     "searchable": false,
-                    'bSortable': false,
-                    "orderable": false,
+                    "orderable": false
+                },
+                {
                     "targets": 6,
                     "render": function(data, type, row) {
                         if (type === 'display' && data) {
@@ -256,6 +279,16 @@ $friday = date('Y-m-d', strtotime('friday this week'));
                             return '<span title="' + data.replace(/"/g, '&quot;') + '">' + shortText + '</span>';
                         }
                         return data;
+                    }
+                },
+                {
+                    "targets": 3,
+                    "width": "200px",
+                    "render": function(data, type, row) {
+                        if (type === 'display' && data && data !== '-') {
+                            return '<span style="white-space:normal;word-break:break-word;">' + data + '</span>';
+                        }
+                        return data || '-';
                     }
                 }
             ],

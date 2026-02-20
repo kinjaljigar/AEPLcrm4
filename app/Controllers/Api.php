@@ -46,19 +46,10 @@ class Api extends BaseController
 
                     $session->set('admin_session', $admin_session);
 
-                    // Record attendance in aa_present
+                    // Record attendance in aa_present (INSERT IGNORE handles duplicates and race conditions silently)
                     $db = \Config\Database::connect();
                     $today = date('Y-m-d');
-                    $existing = $db->table('aa_present')
-                        ->where('pr_u_id', $user['u_id'])
-                        ->where('pr_date', $today)
-                        ->countAllResults();
-                    if ($existing == 0) {
-                        $db->table('aa_present')->insert([
-                            'pr_u_id' => $user['u_id'],
-                            'pr_date' => $today
-                        ]);
-                    }
+                    $db->query("INSERT IGNORE INTO aa_present (pr_u_id, pr_date) VALUES (?, ?)", [$user['u_id'], $today]);
 
                     // Fetch or generate JWT token for users with u_app_auth = 1
                     $token = '';
@@ -109,10 +100,26 @@ class Api extends BaseController
 
                     $session->set('token', $token);
 
+                    // Determine redirect URL (matches CI3 logic exactly)
+                    $authorization = new \App\Libraries\Authorization();
+                    if ($authorization->is_role_allowed($user['u_type'], ['Bim Head', 'Master Admin', 'Project Leader', 'Super Admin', 'TaskCoordinator'])) {
+                        $url = base_url('home/index');
+                    } else if ($authorization->is_role_allowed($user['u_type'], ['Associate User'])) {
+                        $url = base_url('usertask');
+                    } else {
+                        if ($user['u_username'] === 'aeplit') {
+                            $url = base_url('ticket/assigned');
+                        } else if ($user['u_type'] === 'MailCoordinator') {
+                            $url = base_url('home/messages');
+                        } else {
+                            $url = base_url('home/tasks');
+                        }
+                    }
+
                     // Return JSON response
                     echo json_encode([
                         'status' => 'pass',
-                        'url' => base_url('home'),
+                        'url' => $url,
                         'message' => 'Login successful'
                     ]);
                     exit;
@@ -413,12 +420,13 @@ class Api extends BaseController
                     $p_value = floatval($project['p_value'] ?? 0);
                     $profit = $p_value - $total_expense;
 
+                    $isMasterAdmin = ($admin_session['u_type'] ?? '') === 'Master Admin';
                     $data[] = [
                         htmlspecialchars($project['p_name']),
                         !empty($project['p_created']) ? convert_db2display($project['p_created'], false) : '',
-                        number_format($p_value, 2),
-                        number_format($total_expense, 2),
-                        number_format($profit, 2),
+                        $isMasterAdmin ? number_format($p_value, 2) : '0.00',
+                        $isMasterAdmin ? number_format($total_expense, 2) : '0.00',
+                        $isMasterAdmin ? number_format($profit, 2) : '0.00',
                         $project['p_status']
                     ];
                 }
@@ -438,6 +446,7 @@ class Api extends BaseController
                     ->get()->getResultArray();
 
                 $data = [];
+                $isMasterAdmin = ($admin_session['u_type'] ?? '') === 'Master Admin';
                 foreach ($projects as $project) {
                     $expenses = $db->table('aa_project_expense')
                         ->selectSum('pe_val')
@@ -450,9 +459,9 @@ class Api extends BaseController
                     $data[] = [
                         htmlspecialchars($project['p_name']),
                         !empty($project['p_created']) ? convert_db2display($project['p_created'], false) : '',
-                        number_format($p_value, 2),
-                        number_format($total_expense, 2),
-                        number_format($profit, 2),
+                        $isMasterAdmin ? number_format($p_value, 2) : '0.00',
+                        $isMasterAdmin ? number_format($total_expense, 2) : '0.00',
+                        $isMasterAdmin ? number_format($profit, 2) : '0.00',
                         $project['p_status']
                     ];
                 }
@@ -1220,6 +1229,7 @@ class Api extends BaseController
         // Handle Accounts tab (project_detail)
         if ($act === 'accounts') {
             $draw = $request->getPost('draw') ?? 1;
+            $isMasterAdmin = ($admin_session['u_type'] ?? '') === 'Master Admin';
             $expenses = $db->table('aa_project_expense')
                 ->where('pe_p_id', $p_id)
                 ->get()->getResultArray();
@@ -1227,14 +1237,15 @@ class Api extends BaseController
             $result = [];
             $total = 0;
             foreach ($expenses as $exp) {
-                $result[] = [$exp['pe_lbl'], number_format($exp['pe_val'], 2)];
-                $total += floatval($exp['pe_val']);
+                $expVal = $isMasterAdmin ? floatval($exp['pe_val']) : 0;
+                $result[] = [$exp['pe_lbl'], number_format($expVal, 2)];
+                $total += $expVal;
             }
             // Add salary row
             try {
                 $sql = "SELECT SUM(total_salary) as final_salary FROM (SELECT ((at_end - at_start) / 60 * u_salary) as total_salary FROM aa_attendance A INNER JOIN aa_users_salary U ON A.at_u_id = U.u_id WHERE at_p_id = ? and at_date >= u_start_date and at_date < u_end_date) as FinnalDB";
                 $salaryResult = $db->query($sql, [$p_id])->getRowArray();
-                $totalSalary = floatval($salaryResult['final_salary'] ?? 0);
+                $totalSalary = $isMasterAdmin ? floatval($salaryResult['final_salary'] ?? 0) : 0;
             } catch (\Exception $e) {
                 $totalSalary = 0;
             }
@@ -1597,6 +1608,7 @@ class Api extends BaseController
         $builder = $db->table('aa_users');
         $builder->select('*');
         $builder->where('u_type !=', 'Associate User');
+        $builder->where('u_type !=', 'Master Admin');
 
         // Apply filters
         if (!empty($txt_search)) {
@@ -1614,11 +1626,15 @@ class Api extends BaseController
                 $builder->where('u_status', 'Active');
         }
 
+        $builder->orderBy('u_id', 'DESC');
+
         // Get total count
         $totalRecords = $builder->countAllResults(false);
 
         // Get filtered data
         $employees = $builder->get()->getResultArray();
+
+        $isMasterAdmin = (($admin_session['u_type'] ?? '') === 'Master Admin');
 
         // Format data for DataTables
         $data = [];
@@ -1628,7 +1644,7 @@ class Api extends BaseController
             $row[] = $employee['u_name'];
             $row[] = $employee['u_email'];
             $row[] = $employee['u_mobile'];
-            $row[] = $employee['u_salary'] ?? '';
+            $row[] = $isMasterAdmin ? ($employee['u_salary'] ?? '0') : '0';
             $row[] = $employee['u_type'];
 
             // Action buttons
@@ -1709,7 +1725,8 @@ class Api extends BaseController
                         $builder->select('u_id, u_name');
                         $builder->where('u_status', 'Active');
                         $builder->where('u_type !=', 'Associate User');
-                        $builder->orderBy('u_name', 'ASC');
+                        $builder->where('u_type !=', 'Master Admin');
+                        $builder->orderBy('u_id', 'ASC');
                         $employees = $builder->get()->getResultArray();
 
                         $html = '<option value="">Select Employee</option>';
@@ -2533,7 +2550,29 @@ class Api extends BaseController
 
                 // Role-based filtering
                 $u_type = $admin_session['u_type'];
-                if (!in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator', 'MailCoordinator'])) {
+                if ($u_type === 'Project Leader') {
+                    // Project Leader: only messages they created or were sent to, AND only from their assigned projects
+                    $plProjects = $db->table('aa_projects')
+                        ->select('p_id')
+                        ->like('p_leader', $admin_session['u_id'])
+                        ->get()->getResultArray();
+                    $plProjectIds = array_column($plProjects, 'p_id');
+
+                    $builder->groupStart()
+                        ->where('PM.pm_created_by', $admin_session['u_id'])
+                        ->orWhereIn('PM.pm_id', function($subquery) use ($admin_session) {
+                            return $subquery->select('pmu_pm_id')
+                                ->from('aa_project_message_users')
+                                ->where('pmu_u_id', $admin_session['u_id']);
+                        })
+                        ->groupEnd();
+
+                    if (!empty($plProjectIds)) {
+                        $builder->whereIn('PM.pm_p_id', $plProjectIds);
+                    } else {
+                        $builder->where('PM.pm_id', 0); // no assigned projects, no results
+                    }
+                } elseif (!in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator', 'MailCoordinator'])) {
                     $builder->groupStart()
                         ->where('PM.pm_created_by', $admin_session['u_id'])
                         ->orWhereIn('PM.pm_id', function($subquery) use ($admin_session) {
@@ -3132,6 +3171,20 @@ class Api extends BaseController
                 break;
 
             case 'add':
+                // dependency_text[] and dep_leader[] come as arrays from the dynamic row form
+                // Flatten them to strings for the summary columns on aa_weekly_work
+                $depTextPost = $request->getPost('dependency_text');
+                $depTextSummary = is_array($depTextPost) ? implode('; ', array_filter((array)$depTextPost)) : ($depTextPost ?? '');
+
+                $depLeaderPost = $request->getPost('dep_leader');
+                if (is_array($depLeaderPost)) {
+                    $flatIds = [];
+                    array_walk_recursive($depLeaderPost, function($id) use (&$flatIds) { if ($id !== '') $flatIds[] = $id; });
+                    $depLeaderIds = implode(',', array_unique($flatIds));
+                } else {
+                    $depLeaderIds = $depLeaderPost ?? '';
+                }
+
                 $weeklyData = [
                     'p_id' => $request->getPost('p_id'),
                     'leader_id' => $u_id,
@@ -3142,8 +3195,8 @@ class Api extends BaseController
                     'no_of_persons' => $request->getPost('no_of_persons') ?? 0,
                     'status' => $request->getPost('status') ?? 'WIP',
                     'dependency_type' => $request->getPost('dependency_type') ?? '',
-                    'dependency_text' => $request->getPost('dependency_text') ?? '',
-                    'dep_leader_ids' => is_array($request->getPost('dep_leader')) ? implode(',', $request->getPost('dep_leader')) : ($request->getPost('dep_leader') ?? ''),
+                    'dependency_text' => $depTextSummary,
+                    'dep_leader_ids' => $depLeaderIds,
                     'dependency_date' => $request->getPost('dependency_date') ?: null,
                     'created_at' => date('Y-m-d H:i:s'),
                 ];
@@ -3467,7 +3520,10 @@ class Api extends BaseController
                     $builder->where('WD.priority', $priority);
                 }
                 if (!empty($leader)) {
-                    $builder->where('WD.created_by', $leader);
+                    $builder->groupStart()
+                        ->where('WD.created_by', $leader)
+                        ->orLike('WD.dep_leader_ids', $leader)
+                    ->groupEnd();
                 }
                 if (!empty($from_date)) {
                     $builder->where('WD.created_date >=', $from_date);
@@ -3759,7 +3815,7 @@ class Api extends BaseController
                 if ($sub_type == 'daily') $rpt_end = $rpt_start;
                 $sql = "SELECT u_name, u_id, SUM(whours) as work_hours FROM (SELECT u_name, u_id, ((at_end - at_start) / 60) as whours FROM aa_users U INNER JOIN aa_attendance ATT ON U.u_id = ATT.at_u_id AND ATT.at_date BETWEEN '{$rpt_start}' AND '{$rpt_end}'";
                 if ($txt_search) $sql .= " AND U.u_name LIKE '%{$txt_search}%'";
-                $sql .= ") AS DB2 GROUP BY u_id ORDER BY u_name ASC";
+                $sql .= ") AS DB2 GROUP BY u_id ORDER BY u_id ASC";
                 $records = $db->query($sql)->getResultArray();
                 $data = [];
                 foreach ($records as $rec) {
@@ -3825,7 +3881,7 @@ class Api extends BaseController
                 break;
 
             case 'leave':
-                $records = $db->query("SELECT u_name, l_u_id, SUM(CASE WHEN l_is_halfday = 'Yes' THEN 0.5 ELSE DATEDIFF(l_to_date, l_from_date) + 1 END) as final_leave FROM aa_leaves L INNER JOIN aa_users U ON U.u_id = L.l_u_id WHERE l_from_date >= '{$rpt_start}' AND l_to_date <= '{$rpt_end}' AND l_is_hourly = 'No'" . ($txt_search ? " AND u_name LIKE '%{$txt_search}%'" : "") . " GROUP BY l_u_id ORDER BY u_name ASC")->getResultArray();
+                $records = $db->query("SELECT u_name, l_u_id, SUM(CASE WHEN l_is_halfday = 'Yes' THEN 0.5 ELSE DATEDIFF(l_to_date, l_from_date) + 1 END) as final_leave FROM aa_leaves L INNER JOIN aa_users U ON U.u_id = L.l_u_id WHERE l_from_date >= '{$rpt_start}' AND l_to_date <= '{$rpt_end}' AND l_is_hourly = 'No'" . ($txt_search ? " AND u_name LIKE '%{$txt_search}%'" : "") . " GROUP BY l_u_id ORDER BY U.u_id ASC")->getResultArray();
                 $data = [];
                 foreach ($records as $rec) {
                     $approved = $db->query("SELECT COALESCE(SUM(CASE WHEN l_is_halfday = 'Yes' THEN 0.5 ELSE DATEDIFF(l_to_date, l_from_date) + 1 END), 0) as approved_leave FROM aa_leaves WHERE l_u_id = '{$rec['l_u_id']}' AND l_from_date >= '{$rpt_start}' AND l_to_date <= '{$rpt_end}' AND l_status = 'Approved' AND l_is_hourly = 'No'")->getRowArray();
@@ -3848,6 +3904,7 @@ class Api extends BaseController
                     ->where('L.l_is_hourly', 'No')
                     ->where('L.l_from_date <=', $rpt_start)
                     ->where('L.l_to_date >=', $rpt_start)
+                    ->orderBy('U.u_id', 'ASC')
                     ->get()->getResultArray();
                 $data = [];
                 foreach ($records as $rec) {
@@ -3907,19 +3964,55 @@ class Api extends BaseController
                 $total_leaves_setting = $db->table('aa_settings')->where('s_key', 'total_emp_leaves')->get()->getRowArray();
                 $total_leaves = $total_leaves_setting ? $total_leaves_setting['s_value'] : 0;
                 $where = $txt_search ? " AND u_name LIKE '%{$txt_search}%'" : "";
-                $users = $db->query("SELECT * FROM aa_users WHERE ((u_status = 'Deactive' AND u_leave_date >= '{$rs}') OR (u_status = 'Active')){$where} ORDER BY u_name ASC")->getResultArray();
+                $users = $db->query("SELECT * FROM aa_users WHERE ((u_status = 'Deactive' AND u_leave_date >= '{$rs}') OR (u_status = 'Active')){$where} ORDER BY u_id ASC")->getResultArray();
                 $data = [];
                 foreach ($users as $user) {
-                    $approved = $db->query("SELECT COALESCE(SUM(CASE WHEN l_is_halfday = 'Yes' THEN 0.5 ELSE DATEDIFF(l_to_date, l_from_date) + 1 END), 0) as approved_leave FROM aa_leaves WHERE l_u_id = '{$user['u_id']}' AND l_from_date >= '{$rs}' AND l_to_date <= '{$re}' AND l_status = 'Approved' AND l_is_hourly = 'No'")->getRowArray();
-                    $approved_hourly = $db->query("SELECT COALESCE(SUM(l_hourly_time_hour), 0) as approved_leave FROM aa_leaves WHERE l_u_id = '{$user['u_id']}' AND l_from_date >= '{$rs}' AND l_to_date <= '{$re}' AND l_status = 'Approved' AND l_is_hourly = 'Yes'")->getRowArray();
-                    $app = $approved['approved_leave'] ?? 0;
+                    $uid = $user['u_id'];
+                    // CI3-equivalent 8-union query: handles all 4 date-overlap cases for both halfday and full-day leaves
+                    $approved = $db->query("
+                        SELECT COALESCE(SUM(total_days), 0) as approved_leave FROM (
+                            (SELECT l_id, DATEDIFF(l_to_date, l_from_date) + 1 as total_days FROM aa_leaves WHERE l_u_id = '{$uid}' AND l_status = 'Approved' AND l_from_date BETWEEN '{$rs}' AND '{$re}' AND l_to_date BETWEEN '{$rs}' AND '{$re}' AND l_is_halfday = 'No' AND l_is_hourly = 'No')
+                            UNION
+                            (SELECT l_id, DATEDIFF('{$re}', '{$rs}') + 1 as total_days FROM aa_leaves WHERE l_u_id = '{$uid}' AND l_status = 'Approved' AND '{$rs}' BETWEEN l_from_date AND l_to_date AND '{$re}' BETWEEN l_from_date AND l_to_date AND l_is_halfday = 'No' AND l_is_hourly = 'No')
+                            UNION
+                            (SELECT l_id, DATEDIFF(l_to_date, '{$rs}') + 1 as total_days FROM aa_leaves WHERE l_u_id = '{$uid}' AND l_status = 'Approved' AND '{$rs}' BETWEEN l_from_date AND l_to_date AND l_to_date BETWEEN '{$rs}' AND '{$re}' AND l_is_halfday = 'No' AND l_is_hourly = 'No')
+                            UNION
+                            (SELECT l_id, DATEDIFF('{$re}', l_from_date) + 1 as total_days FROM aa_leaves WHERE l_u_id = '{$uid}' AND l_status = 'Approved' AND l_from_date BETWEEN '{$rs}' AND '{$re}' AND '{$re}' BETWEEN l_from_date AND l_to_date AND l_is_halfday = 'No' AND l_is_hourly = 'No')
+                            UNION
+                            (SELECT l_id, DATEDIFF(l_to_date, l_from_date) + 0.5 as total_days FROM aa_leaves WHERE l_u_id = '{$uid}' AND l_status = 'Approved' AND l_from_date BETWEEN '{$rs}' AND '{$re}' AND l_to_date BETWEEN '{$rs}' AND '{$re}' AND l_is_halfday = 'Yes' AND l_is_hourly = 'No')
+                            UNION
+                            (SELECT l_id, DATEDIFF('{$re}', '{$rs}') + 0.5 as total_days FROM aa_leaves WHERE l_u_id = '{$uid}' AND l_status = 'Approved' AND '{$rs}' BETWEEN l_from_date AND l_to_date AND '{$re}' BETWEEN l_from_date AND l_to_date AND l_is_halfday = 'Yes' AND l_is_hourly = 'No')
+                            UNION
+                            (SELECT l_id, DATEDIFF(l_to_date, '{$rs}') + 0.5 as total_days FROM aa_leaves WHERE l_u_id = '{$uid}' AND l_status = 'Approved' AND '{$rs}' BETWEEN l_from_date AND l_to_date AND l_to_date BETWEEN '{$rs}' AND '{$re}' AND l_is_halfday = 'Yes' AND l_is_hourly = 'No')
+                            UNION
+                            (SELECT l_id, DATEDIFF('{$re}', l_from_date) + 0.5 as total_days FROM aa_leaves WHERE l_u_id = '{$uid}' AND l_status = 'Approved' AND l_from_date BETWEEN '{$rs}' AND '{$re}' AND '{$re}' BETWEEN l_from_date AND l_to_date AND l_is_halfday = 'Yes' AND l_is_hourly = 'No')
+                        ) AS FinalTb
+                    ")->getRowArray();
+                    // CI3-equivalent: convert HH.MM stored values to minutes, sum, convert back to HH.MM string
+                    $approved_hourly = $db->query("
+                        SELECT CONCAT(
+                            FLOOR(COALESCE(SUM(FLOOR(l_hourly_time_hour) * 60 + ROUND((l_hourly_time_hour - FLOOR(l_hourly_time_hour)) * 100)), 0) / 60),
+                            '.',
+                            LPAD(MOD(COALESCE(SUM(FLOOR(l_hourly_time_hour) * 60 + ROUND((l_hourly_time_hour - FLOOR(l_hourly_time_hour)) * 100)), 0), 60), 2, '0')
+                        ) as approved_leave
+                        FROM aa_leaves
+                        WHERE l_u_id = '{$uid}' AND l_from_date >= '{$rs}' AND l_to_date <= '{$re}'
+                        AND l_status = 'Approved' AND l_is_hourly = 'Yes'
+                    ")->getRowArray();
+                    $hourly_str = $approved_hourly['approved_leave'] ?? '0.00';
+
+                    $app = round((float)($approved['approved_leave'] ?? 0), 2);
+                    $remaining = round($total_leaves - $app, 2);
+
+                    $fmt = function($v) { return (fmod($v, 1) !== 0.0) ? number_format($v, 2) : (int)$v; };
+
                     $row = [];
                     $row[] = $user['u_name'];
-                    $row[] = (fmod($app, 1) !== 0.0) ? $app : (int)$app;
-                    $row[] = (fmod($approved_hourly['approved_leave'], 1) !== 0.0) ? $approved_hourly['approved_leave'] : (int)$approved_hourly['approved_leave'];
-                    $row[] = ($total_leaves - $app);
-                    $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showData(\'' . $user['u_id'] . '\', \'' . $user['u_name'] . '\', \'' . $rs . '\', \'' . $re . '\')"><i class="fa fa-eye"></i></a>';
-                    $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showDataHour(\'' . $user['u_id'] . '\', \'' . $user['u_name'] . '\', \'' . $rs . '\', \'' . $re . '\')"><i class="fa fa-eye"></i></a>';
+                    $row[] = $fmt($app);
+                    $row[] = $hourly_str;
+                    $row[] = $fmt($remaining);
+                    $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showData(\'' . $uid . '\', \'' . $user['u_name'] . '\', \'' . $rs . '\', \'' . $re . '\')"><i class="fa fa-eye"></i></a>';
+                    $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showDataHour(\'' . $uid . '\', \'' . $user['u_name'] . '\', \'' . $rs . '\', \'' . $re . '\')"><i class="fa fa-eye"></i></a>';
                     $data[] = $row;
                 }
                 echo json_encode(['draw' => intval($draw), 'recordsTotal' => count($data), 'recordsFiltered' => count($data), 'data' => $data]);
@@ -3936,7 +4029,8 @@ class Api extends BaseController
                     ->where('L.l_is_hourly', 'Yes')
                     ->where('L.l_from_date >=', $rpt_start)
                     ->where('L.l_to_date <=', $rpt_end)
-                    ->groupBy('U.u_id');
+                    ->groupBy('U.u_id')
+                    ->orderBy('U.u_id', 'ASC');
                 if ($txt_search) $qb->like('U.u_name', $txt_search);
                 $records = $qb->get()->getResultArray();
                 $data = [];
@@ -3960,6 +4054,7 @@ class Api extends BaseController
                     ->where('L.l_is_hourly', 'Yes')
                     ->where('L.l_from_date >=', $rpt_start)
                     ->where('L.l_to_date <=', $rpt_start)
+                    ->orderBy('U.u_id', 'ASC')
                     ->get()->getResultArray();
                 $data = [];
                 foreach ($records as $rec) {
@@ -4290,7 +4385,7 @@ class Api extends BaseController
                     $nestedData = [];
                     $nestedData[] = $rec['u_username'];
                     $nestedData[] = $rec['u_name'];
-                    $nestedData[] = $rec['u_salary'] ?? '';
+                    $nestedData[] = ($admin_session['u_type'] ?? '') === 'Master Admin' ? ($rec['u_salary'] ?? '') : '0';
                     $nestedData[] = $rec['u_type'];
                     $nestedData[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showData(\'' . $rec['u_id'] . '\', \'' . addslashes($rec['u_name']) . '\')"><i class="fa fa-eye"></i></a>&nbsp; ';
                     $result[] = $nestedData;
@@ -4314,7 +4409,7 @@ class Api extends BaseController
                         $nestedData[] = $rec['u_name'];
                         $nestedData[] = $rec['u_start_date'] ?? '';
                         $nestedData[] = $rec['u_end_date'] ?? '';
-                        $nestedData[] = $rec['u_salary'] ?? '';
+                        $nestedData[] = ($admin_session['u_type'] ?? '') === 'Master Admin' ? ($rec['u_salary'] ?? '') : '0';
                         $result[] = $nestedData;
                     }
                     echo json_encode(['draw' => intval($draw), 'recordsTotal' => intval($totalData), 'recordsFiltered' => intval($totalData), 'data' => $result]);
@@ -4382,6 +4477,7 @@ class Api extends BaseController
 
             case 'pemployeedetail':
                 $p_id = $request->getPost('p_id');
+                $isMasterAdmin = ($admin_session['u_type'] ?? '') === 'Master Admin';
                 $recordsP = $db->table('aa_projects')->where('p_id', $p_id)->get()->getRowArray();
                 $records = $db->query("SELECT total_salary as final_salary, total_hrs, Username FROM (SELECT (SUM((at_end - at_start) / 60 * US.u_salary)) as total_salary, SUM((at_end - at_start) / 60) as total_hrs, U.u_id as UserId, U.u_name as Username FROM aa_attendance A INNER JOIN aa_users_salary US ON A.at_u_id = US.u_id, aa_users as U WHERE at_p_id = '{$p_id}' AND at_date >= US.u_start_date AND at_date < US.u_end_date AND U.u_id = US.u_id GROUP BY U.u_id) as FinnalDB")->getResultArray();
                 $total = 0;
@@ -4395,8 +4491,8 @@ class Api extends BaseController
                     $nestedData[] = $recordsP['p_name'] ?? '';
                     $nestedData[] = $rec['Username'];
                     $nestedData[] = number_format($this->convertHours($rec['total_hrs'] ?? 0), 2);
-                    $nestedData[] = $rec['final_salary'];
-                    $total += $rec['final_salary'];
+                    $nestedData[] = $isMasterAdmin ? $rec['final_salary'] : 0;
+                    if ($isMasterAdmin) $total += $rec['final_salary'];
                     $result[] = $nestedData;
                 }
                 echo json_encode(['draw' => intval($draw), 'data' => $result, 'total' => $total]);

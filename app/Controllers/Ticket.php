@@ -78,7 +78,7 @@ class Ticket extends BaseController
         $files = $request->getFiles();
         if (isset($files['attachments'])) {
             $attachments = $files['attachments'];
-            $ticket_folder = FCPATH . 'assets/tickets/' . $ticket_id . '/';
+            $ticket_folder = ROOTPATH . 'assets/tickets/' . $ticket_id . '/';
             if (!is_dir($ticket_folder)) {
                 mkdir($ticket_folder, 0777, true);
             }

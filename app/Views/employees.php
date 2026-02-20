@@ -115,12 +115,14 @@
                         placeholder="" readonly>
                 </div>
             </div>
+            <?php if ($view_data['admin_session']['u_type'] === 'Master Admin'): ?>
             <div class="col-lg-4 col-md-6 col-sm-12">
                 <div class="form-group">
                     <label for="u_salary">Salary/hr </label>
                     <input type="text" class="form-control" id="u_salary" name="u_salary" value="" placeholder="">
                 </div>
             </div>
+            <?php endif; ?>
             <div class="form-group col-lg-4 col-md-6 col-sm-12">
                 <label for="u_app_auth">Active in Mobile App</label>
                 <select class="form-control" name="u_app_auth" id="u_app_auth">
