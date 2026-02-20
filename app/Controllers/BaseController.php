@@ -211,6 +211,9 @@ abstract class BaseController extends Controller
 
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         $body = curl_exec($ch);
+        if ($body === false) {
+            $body = '';
+        }
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
         curl_close($ch);

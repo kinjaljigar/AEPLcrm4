@@ -14,7 +14,7 @@ class CompanyUser extends BaseController
             : 'company/user/list';
 
         $result      = $this->callExternalApi($endpoint);
-        $decoded     = json_decode($result['body'], true);
+        $decoded     = json_decode($result['body'], true) ?: [];
         $companyUsers = $decoded ?? [];
 
         $this->view_data['page']          = 'company/user/list';
@@ -30,11 +30,11 @@ class CompanyUser extends BaseController
     {
         // Fetch companies and projects for dropdowns
         $compResult = $this->callExternalApi('company/list?page=1&limit=1000');
-        $compDecoded = json_decode($compResult['body'], true);
+        $compDecoded = json_decode($compResult['body'], true) ?: [];
         $available_companies = $compDecoded['data'] ?? [];
 
         $projResult = $this->callExternalApi('projectlist?page=1&limit=10000');
-        $projDecoded = json_decode($projResult['body'], true);
+        $projDecoded = json_decode($projResult['body'], true) ?: [];
         $available_projects = $projDecoded['data'] ?? [];
 
         $this->view_data['page']                 = 'company/user/add';
@@ -62,7 +62,7 @@ class CompanyUser extends BaseController
         ];
 
         $result  = $this->callExternalApi('company/add-user', 'POST', $data);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('companyuser');
@@ -74,15 +74,15 @@ class CompanyUser extends BaseController
     public function edit($id)
     {
         $result  = $this->callExternalApi('company/edit/user/' . $id);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $companyUser = $decoded['data'][0] ?? $decoded['data'] ?? [];
 
         $compResult = $this->callExternalApi('company/list?page=1&limit=1000');
-        $compDecoded = json_decode($compResult['body'], true);
+        $compDecoded = json_decode($compResult['body'], true) ?: [];
         $available_companies = $compDecoded['data'] ?? [];
 
         $projResult = $this->callExternalApi('projectlist?page=1&limit=10000');
-        $projDecoded = json_decode($projResult['body'], true);
+        $projDecoded = json_decode($projResult['body'], true) ?: [];
         $available_projects = $projDecoded['data'] ?? [];
 
         $this->view_data['page']                = 'company/user/edit';
@@ -110,7 +110,7 @@ class CompanyUser extends BaseController
         ];
 
         $result  = $this->callExternalApi('company/update/user/' . $id, 'PUT', $data);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('companyuser');

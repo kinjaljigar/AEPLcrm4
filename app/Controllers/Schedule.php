@@ -17,7 +17,7 @@ class Schedule extends BaseController
         }
 
         $result    = $this->callExternalApi($endpoint);
-        $decoded   = json_decode($result['body'], true);
+        $decoded   = json_decode($result['body'], true) ?: [];
         $schedules = $decoded ?? [];
 
         $this->view_data['page']          = 'schedule/list';
@@ -60,7 +60,7 @@ class Schedule extends BaseController
         ];
 
         $result  = $this->callExternalApi('schedule/add', 'POST', $data);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('schedule');
@@ -72,14 +72,14 @@ class Schedule extends BaseController
     public function edit($id)
     {
         $result  = $this->callExternalApi('schedule/edit/' . $id);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $schedule = $decoded ?? [];
 
         // Fetch timeslots for the schedule date
         $schedData = $decoded['data'] ?? [];
         $date = $schedData['date'] ?? date('Y-m-d');
         $tsResult  = $this->callExternalApi('schedule/timeslots/' . $date);
-        $tsDecoded = json_decode($tsResult['body'], true);
+        $tsDecoded = json_decode($tsResult['body'], true) ?: [];
         $timeslots = $tsDecoded['availableslots'] ?? [];
 
         $this->view_data['page']          = 'schedule/edit';
@@ -105,7 +105,7 @@ class Schedule extends BaseController
         ];
 
         $result  = $this->callExternalApi('schedule/update/' . $id, 'PUT', $data);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('schedule');
@@ -117,12 +117,12 @@ class Schedule extends BaseController
     public function view($id)
     {
         $result  = $this->callExternalApi('schedule/edit/' . $id);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $schedule = $decoded ?? [];
 
         $date = $decoded['data']['date'] ?? date('Y-m-d');
         $tsResult  = $this->callExternalApi('schedule/timeslots/' . $date);
-        $tsDecoded = json_decode($tsResult['body'], true);
+        $tsDecoded = json_decode($tsResult['body'], true) ?: [];
         $timeslots = $tsDecoded['availableslots'] ?? [];
 
         $this->view_data['page']          = 'schedule/view';
@@ -150,7 +150,7 @@ class Schedule extends BaseController
         $date = $this->request->getPost('date');
 
         $result      = $this->callExternalApi('schedule/timeslots/' . $date);
-        $apiResponse = json_decode($result['body'], true);
+        $apiResponse = json_decode($result['body'], true) ?: [];
         $timeslots   = $apiResponse['availableslots'] ?? [];
 
         header('Content-Type: application/json');

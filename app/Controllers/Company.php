@@ -14,7 +14,7 @@ class Company extends BaseController
             : 'company/list?page=1&limit=1000';
 
         $result    = $this->callExternalApi($endpoint);
-        $decoded   = json_decode($result['body'], true);
+        $decoded   = json_decode($result['body'], true) ?: [];
         $companies = $decoded ?? [];
 
         $this->view_data['page']          = 'company/list';
@@ -45,7 +45,7 @@ class Company extends BaseController
         ];
 
         $result  = $this->callExternalApi('company/add', 'POST', $data);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('company');
@@ -57,7 +57,7 @@ class Company extends BaseController
     public function edit($id)
     {
         $result  = $this->callExternalApi('company/edit/' . $id);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $company = $decoded ?? [];
 
         $this->view_data['page']          = 'company/edit';
@@ -77,7 +77,7 @@ class Company extends BaseController
         ];
 
         $result  = $this->callExternalApi('company/update/' . $id, 'PUT', $data);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('company');

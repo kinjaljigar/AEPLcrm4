@@ -15,7 +15,7 @@ class UserTask extends BaseController
             : 'task/list?page=1&limit=1000&data=' . $dataURL;
 
         $result  = $this->callExternalApi($endpoint);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $tasks   = $decoded ?? [];
 
         $this->view_data['page']          = 'company/user/task/list';
@@ -31,7 +31,7 @@ class UserTask extends BaseController
     public function view($id)
     {
         $result  = $this->callExternalApi('task/edit/' . $id);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $task    = $decoded['task'] ?? $decoded['data'] ?? [];
 
         // Ensure attachment URLs are absolute (prepend aashirmob base if relative)
@@ -57,7 +57,7 @@ class UserTask extends BaseController
     {
         // Fetch company users for assignment dropdown
         $result  = $this->callExternalApi('company/user/list?page=1&limit=10000');
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $allusers = array_merge(
             $decoded['allusers'] ?? [],
             $decoded['adminallusers'] ?? []
@@ -99,7 +99,7 @@ class UserTask extends BaseController
         }
 
         $result  = $this->callExternalApi('task/add', 'POST', $data);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('usertask');
@@ -111,7 +111,7 @@ class UserTask extends BaseController
     public function edit($id)
     {
         $result  = $this->callExternalApi('task/edit/' . $id);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $task    = $decoded['task'] ?? $decoded['data'] ?? [];
 
         // Ensure attachment URLs are absolute (prepend aashirmob base if relative)
@@ -127,7 +127,7 @@ class UserTask extends BaseController
 
         // Fetch company users for assignment dropdown
         $usersResult  = $this->callExternalApi('company/user/list?page=1&limit=1000');
-        $usersDecoded = json_decode($usersResult['body'], true);
+        $usersDecoded = json_decode($usersResult['body'], true) ?: [];
         $allusers = array_merge(
             $usersDecoded['allusers'] ?? [],
             $usersDecoded['adminallusers'] ?? []
@@ -171,7 +171,7 @@ class UserTask extends BaseController
         }
 
         $result  = $this->callExternalApi('task/update/' . $id, 'POST', $data);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('usertask');
@@ -197,7 +197,7 @@ class UserTask extends BaseController
             : 'task/list?page=1&limit=1000&data=' . $dataURL;
 
         $result  = $this->callExternalApi($endpoint);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         $view_data = [
             'tasks'         => $decoded ?? [],
@@ -222,7 +222,7 @@ class UserTask extends BaseController
             ];
 
             $result  = $this->callExternalApi('task/statusupdate/' . $id, 'PUT', $data);
-            $decoded = json_decode($result['body'], true);
+            $decoded = json_decode($result['body'], true) ?: [];
 
             while (ob_get_level() > 0) { ob_end_clean(); }
             header('Content-Type: application/json');
@@ -235,7 +235,7 @@ class UserTask extends BaseController
 
         // GET - return task data from API
         $result  = $this->callExternalApi('task/edit/' . $id);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         while (ob_get_level() > 0) { ob_end_clean(); }
         header('Content-Type: application/json');

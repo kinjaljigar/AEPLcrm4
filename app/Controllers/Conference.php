@@ -15,7 +15,7 @@ class Conference extends BaseController
             : 'conference/list?page=1&limit=1000&data=' . $dataURL;
 
         $result = $this->callExternalApi($endpoint);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $conferences = $decoded ?? [];
 
         $this->view_data['page']          = 'conference/list';
@@ -57,7 +57,7 @@ class Conference extends BaseController
         ];
 
         $result  = $this->callExternalApi('conference/add', 'POST', $data);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('conference');
@@ -69,14 +69,14 @@ class Conference extends BaseController
     public function edit($id)
     {
         $result  = $this->callExternalApi('conference/edit/' . $id);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $conference = $decoded ?? [];
 
         // Fetch timeslots for the conference date
         $confData = $decoded['data'] ?? [];
         $date = $confData['date'] ?? date('Y-m-d');
         $tsResult  = $this->callExternalApi('conference/timeslots/' . $date . '/' . ($confData['room_id'] ?? ''));
-        $tsDecoded = json_decode($tsResult['body'], true);
+        $tsDecoded = json_decode($tsResult['body'], true) ?: [];
         $timeslots = $tsDecoded['availableslots'] ?? [];
 
         $this->view_data['page']          = 'conference/edit';
@@ -102,7 +102,7 @@ class Conference extends BaseController
         ];
 
         $result  = $this->callExternalApi('conference/update/' . $id, 'PUT', $data);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
 
         if (($decoded['status'] ?? '') == 200 || $result['code'] == 200) {
             return redirect()->to('conference');
@@ -120,11 +120,11 @@ class Conference extends BaseController
     public function view($id)
     {
         $result  = $this->callExternalApi('conference/edit/' . $id);
-        $decoded = json_decode($result['body'], true);
+        $decoded = json_decode($result['body'], true) ?: [];
         $conference = $decoded ?? [];
 
         $tsResult  = $this->callExternalApi('conference/timeslots');
-        $tsDecoded = json_decode($tsResult['body'], true);
+        $tsDecoded = json_decode($tsResult['body'], true) ?: [];
         $timeslots = $tsDecoded['availableslots'] ?? [];
 
         $this->view_data['page']          = 'conference/view';
@@ -178,7 +178,7 @@ class Conference extends BaseController
         $room_id = $this->request->getPost('room_id');
 
         $result    = $this->callExternalApi('conference/timeslots/' . $date . '/' . $room_id);
-        $apiResponse = json_decode($result['body'], true);
+        $apiResponse = json_decode($result['body'], true) ?: [];
         $timeslots = $apiResponse['availableslots'] ?? [];
 
         header('Content-Type: application/json');

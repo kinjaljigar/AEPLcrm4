@@ -491,8 +491,47 @@ class Api extends BaseController
         }
         exit;
     }
-
     public function getProjectUsers($projectId)
+    {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        $this->response->setHeader('Content-Type', 'application/json');
+
+        $db = \Config\Database::connect();
+
+        // Get project leaders
+        $project = $db->table('aa_projects')
+            ->select('p_leader')
+            ->where('p_id', $projectId)
+            ->get()
+            ->getRowArray();
+
+        if (!$project || empty($project['p_leader'])) {
+            return $this->response->setJSON([]);
+        }
+
+        // Convert comma-separated leaders to array
+        $leaderIds = array_filter(array_unique(explode(',', $project['p_leader'])));
+
+        if (empty($leaderIds)) {
+            return $this->response->setJSON([]);
+        }
+
+        // Fetch only Active Leaders
+        $leaders = $db->table('aa_users')
+            ->select('u_id, u_name, u_type')
+            ->whereIn('u_id', $leaderIds)
+            ->where('u_status', 'Active')
+            ->orderBy('u_name', 'ASC')
+            ->get()
+            ->getResultArray();
+
+        return $this->response->setJSON($leaders);
+    }
+
+    public function getProjectUsers_OLD($projectId)
     {
         while (ob_get_level() > 0) {
             ob_end_clean();

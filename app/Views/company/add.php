@@ -18,10 +18,17 @@ $token = $view_data['token'];
                 </div>
             </div>
             <div class="box-body">
-                <?php $flashError = session()->getFlashdata('error_message'); ?>
+                <?php
+                $flashError = session()->getFlashdata('error_message');
+                if (is_array($flashError)) {
+                    $_msgs = [];
+                    array_walk_recursive($flashError, function($v) use (&$_msgs) { $_msgs[] = $v; });
+                    $flashError = implode(', ', $_msgs);
+                }
+                ?>
                 <?php if ($flashError): ?>
                     <div class="alert alert-danger">
-                        <?= htmlspecialchars(is_array($flashError) ? implode(', ', array_values($flashError)) : $flashError) ?>
+                        <?= htmlspecialchars($flashError) ?>
                     </div>
                 <?php endif; ?>
                 <form action="<?php echo site_url('company/addData/'); ?>" method="post">
