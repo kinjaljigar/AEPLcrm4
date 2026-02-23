@@ -47,15 +47,15 @@ $users = $view_data['users'];
                     </div>
 
                     <?php if (in_array($view_data['admin_session']['u_type'], ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator', 'MailCoordinator'])): ?>
-                    <div class="col-md-2">
-                        <label>Leaders</label>
-                        <select id="search_leader" class="form-control">
-                            <option value="">All</option>
-                            <?php foreach ($view_data['allLeaders'] as $leader): ?>
-                                <option value="<?= $leader['u_id']; ?>"><?= htmlspecialchars($leader['u_name']); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
+                        <div class="col-md-2">
+                            <label>Leaders</label>
+                            <select id="search_leader" class="form-control">
+                                <option value="">All</option>
+                                <?php foreach ($view_data['allLeaders'] as $leader): ?>
+                                    <option value="<?= $leader['u_id']; ?>"><?= htmlspecialchars($leader['u_name']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
                     <?php endif; ?>
 
                     <div class="col-md-2">
@@ -298,12 +298,32 @@ $users = $view_data['users'];
         if (dataTable != null) dataTable.destroy();
         var logged_role = "<?php echo $view_data['admin_session']['u_type']; ?>";
         var canExport = (logged_role === 'Master Admin' || logged_role === 'Bim Head' || logged_role === 'MailCoordinator');
-        var exportOpts = { columns: [0, 1, 2, 3, 4], orthogonal: 'filter' }; // exclude col 5 (Action buttons); use raw data not display HTML
-        var exportButtons = canExport ? [
-            { extend: 'excelHtml5', title: 'Messages', exportOptions: exportOpts },
-            { extend: 'csvHtml5',   title: 'Messages', exportOptions: exportOpts },
-            { extend: 'pdfHtml5',   title: 'Messages', orientation: 'landscape', pageSize: 'A3', exportOptions: exportOpts },
-            { extend: 'print',      title: 'Messages', exportOptions: exportOpts }
+        var exportOpts = {
+            columns: [0, 1, 2, 3, 4],
+            orthogonal: 'filter'
+        }; // exclude col 5 (Action buttons); use raw data not display HTML
+        var exportButtons = canExport ? [{
+                extend: 'excelHtml5',
+                title: 'Messages',
+                exportOptions: exportOpts
+            },
+            {
+                extend: 'csvHtml5',
+                title: 'Messages',
+                exportOptions: exportOpts
+            },
+            {
+                extend: 'pdfHtml5',
+                title: 'Messages',
+                orientation: 'landscape',
+                pageSize: 'A3',
+                exportOptions: exportOpts
+            },
+            {
+                extend: 'print',
+                title: 'Messages',
+                exportOptions: exportOpts
+            }
         ] : [];
         var ajaxData = {
             act: "list",
@@ -321,14 +341,20 @@ $users = $view_data['users'];
                 data: ajaxData
             },
             pageLength: 25,
-            columnDefs: [
-                {
+           // scrollY: "400px", // vertical scroll height
+            scrollX: true, // horizontal scroll
+           // scrollCollapse: true, // collapse height if fewer rows
+            columnDefs: [{
                     "targets": [0, 1, 2, 3, 4],
                     "orderable": false
                 },
                 {
+                    "targets": 0,
+                    "width": "70px",
+                },
+                {
                     "targets": 1,
-                    "width": "210px",
+                    "width": "170px",
                     "render": function(data, type, row) {
                         if (type === 'display' && data) {
                             var safe = String(data).replace(/"/g, '&quot;');
@@ -338,24 +364,35 @@ $users = $view_data['users'];
                     }
                 },
                 {
-                    "targets": 2,
-                    "width": "320px",
-                    "render": function(data, type, row) {
-                        if (type === 'display' && data) {
-                            var safe = String(data).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                            if (data.length > 70) {
-                                var short = data.substr(0, 70);
-                                return '<span style="white-space:normal;word-break:break-word;">' + short +
-                                    '<span data-toggle="tooltip" data-placement="top" data-container="body" title="' + safe + '" style="color:#337ab7;cursor:pointer;font-weight:600;"> ...more</span></span>';
-                            }
-                            return '<span style="white-space:normal;word-break:break-word;">' + data + '</span>';
-                        }
-                        return data || '';
-                    }
-                }
+                    // "targets": 2,
+                    // "width": "320px",
+                    // "render": function(data, type, row) {
+                    //     if (type === 'display' && data) {
+                    //         var safe = String(data).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    //         if (data.length > 70) {
+                    //             var short = data.substr(0, 70);
+                    //             return '<span style="white-space:normal;word-break:break-word;">' + short +
+                    //                 '<span data-toggle="tooltip" data-placement="top" data-container="body" title="' + safe + '" style="color:#337ab7;cursor:pointer;font-weight:600;"> ...more</span></span>';
+                    //         }
+                    //         return '<span style="white-space:normal;word-break:break-word;">' + data + '</span>';
+                    //     }
+                    //     return data || '';
+                    // }
+                }, {
+                    "targets": 3,
+                    "width": "30px",
+                }, {
+                    "targets": 4,
+                    "width": "30px",
+                }, {
+                    "targets": 5,
+                    "width": "30px",
+                },
             ],
             "drawCallback": function() {
-                $('[data-toggle="tooltip"]').tooltip({ container: 'body' });
+                $('[data-toggle="tooltip"]').tooltip({
+                    container: 'body'
+                });
             },
             "dom": canExport ? 'Blfrtip' : 'lfrtip',
             "buttons": exportButtons,

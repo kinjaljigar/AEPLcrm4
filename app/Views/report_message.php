@@ -103,54 +103,86 @@
                     discipline: $("#filter_discipline").val()
                 }
             },
-            columnDefs: [
-            {
-                targets: 0, // Project
-                width: '210px',
-                render: function(data, type) {
-                    if (type === 'display' && data) {
-                        var safe = String(data).replace(/"/g, '&quot;');
-                        return '<span title="' + safe + '" style="white-space:normal;word-break:break-word;display:block;max-width:210px;">' + data + '</span>';
-                    }
-                    return data || '';
-                }
-            },
-            {
-                targets: 2, // Message
-                width: '320px',
-                render: function(data, type) {
-                    if (type === 'display' && data) {
-                        var safe = String(data).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                        if (data.length > 70) {
-                            var short = data.substr(0, 70);
-                            return '<span style="white-space:normal;word-break:break-word;">' + short +
-                                '<span data-toggle="tooltip" data-placement="top" data-container="body" title="' + safe + '" style="color:#337ab7;cursor:pointer;font-weight:600;"> ...more</span></span>';
+            columnDefs: [{
+                    targets: 0, // Project
+                    width: '210px',
+                    render: function(data, type) {
+                        if (type === 'display' && data) {
+                            var safe = String(data).replace(/"/g, '&quot;');
+                            return '<span title="' + safe + '" style="white-space:normal;word-break:break-word;display:block;max-width:210px;">' + data + '</span>';
                         }
-                        return '<span style="white-space:normal;word-break:break-word;">' + data + '</span>';
+                        return data || '';
                     }
-                    return data || '';
+                }, {
+                    "targets": 1,
+                    "width": "70px",
+                },
+                {
+                    // targets: 2, // Message
+                    // width: '320px',
+                    // render: function(data, type) {
+                    //     if (type === 'display' && data) {
+                    //         var safe = String(data).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    //         if (data.length > 70) {
+                    //             var short = data.substr(0, 70);
+                    //             return '<span style="white-space:normal;word-break:break-word;">' + short +
+                    //                 '<span data-toggle="tooltip" data-placement="top" data-container="body" title="' + safe + '" style="color:#337ab7;cursor:pointer;font-weight:600;"> ...more</span></span>';
+                    //         }
+                    //         return '<span style="white-space:normal;word-break:break-word;">' + data + '</span>';
+                    //     }
+                    //     return data || '';
+                    // }
+                },  {
+                    "targets": 3,
+                    "width": "40px",
+                },
+                {
+                    targets: 4, // Replies
+                    render: function(data, type) {
+                        if (type === 'display') {
+                            return data ? data.replace(/\n/g, '<br>') : '';
+                        }
+                        return data;
+                    }
                 }
+            ],
+            drawCallback: function() {
+                $('[data-toggle="tooltip"]').tooltip({
+                    container: 'body'
+                });
             },
-            {
-                targets: 4, // Replies
-                render: function(data, type) {
-                    if (type === 'display') {
-                        return data ? data.replace(/\n/g, '<br>') : '';
-                    }
-                    return data;
-                }
-            }
-        ],
-        drawCallback: function() {
-            $('[data-toggle="tooltip"]').tooltip({ container: 'body' });
-        },
 
             dom: 'Blfrtip',
-            buttons: [
-                { extend: 'excelHtml5', title: 'Message Report', exportOptions: { orthogonal: 'filter' } },
-                { extend: 'csvHtml5',   title: 'Message Report', exportOptions: { orthogonal: 'filter' } },
-                { extend: 'pdfHtml5',   title: 'Message Report', orientation: 'landscape', pageSize: 'A3', exportOptions: { orthogonal: 'filter' } },
-                { extend: 'print',      title: 'Message Report', exportOptions: { orthogonal: 'filter' } }
+            buttons: [{
+                    extend: 'excelHtml5',
+                    title: 'Message Report',
+                    exportOptions: {
+                        orthogonal: 'filter'
+                    }
+                },
+                {
+                    extend: 'csvHtml5',
+                    title: 'Message Report',
+                    exportOptions: {
+                        orthogonal: 'filter'
+                    }
+                },
+                {
+                    extend: 'pdfHtml5',
+                    title: 'Message Report',
+                    orientation: 'landscape',
+                    pageSize: 'A3',
+                    exportOptions: {
+                        orthogonal: 'filter'
+                    }
+                },
+                {
+                    extend: 'print',
+                    title: 'Message Report',
+                    exportOptions: {
+                        orthogonal: 'filter'
+                    }
+                }
             ]
         });
     }
