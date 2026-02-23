@@ -259,8 +259,8 @@ class Api extends BaseController
                     ->select('L.*, U.u_name')
                     ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
                     ->where('L.l_status', 'Pending')
-                    ->orderBy('L.l_id', 'DESC')
-                    ->limit(5);
+                    ->orderBy('L.l_id', 'DESC');
+                   // ->limit(5);
 
                 if (!empty($leaderid)) {
                     // For project leaders, show leaves of employees under them
