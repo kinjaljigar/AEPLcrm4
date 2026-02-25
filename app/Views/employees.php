@@ -104,15 +104,25 @@
             <div class="col-lg-4 col-md-6 col-sm-12">
                 <div class="form-group">
                     <label for="u_join_date">Joining Date </label>
-                    <input type="text" class="form-control date-picker" id="u_join_date" name="u_join_date" value=""
-                        placeholder="" readonly>
+                    <div class="input-group">
+                        <input type="text" class="form-control date-picker" id="u_join_date" name="u_join_date" value=""
+                            placeholder="" readonly>
+                        <span class="input-group-btn">
+                            <button type="button" class="btn btn-default" onclick="$('#admin_add_form #u_join_date').val('');" title="Clear date">&times;</button>
+                        </span>
+                    </div>
                 </div>
             </div>
             <div class="col-lg-4 col-md-6 col-sm-12">
                 <div class="form-group">
                     <label for="u_leave_date">Leaving Date </label>
-                    <input type="text" class="form-control date-picker" id="u_leave_date" name="u_leave_date" value=""
-                        placeholder="" readonly>
+                    <div class="input-group">
+                        <input type="text" class="form-control date-picker" id="u_leave_date" name="u_leave_date" value=""
+                            placeholder="" readonly>
+                        <span class="input-group-btn">
+                            <button type="button" class="btn btn-default" onclick="$('#admin_add_form #u_leave_date').val('');" title="Clear date">&times;</button>
+                        </span>
+                    </div>
                 </div>
             </div>
             <?php if ($view_data['admin_session']['u_type'] === 'Master Admin'): ?>

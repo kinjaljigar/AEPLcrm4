@@ -278,8 +278,12 @@ class Api extends BaseController
 
                     // Hourly / Half Day Leave
                     $leaveType = '';
-                    if (($leave['l_is_halfday'] ?? '') === 'Yes') $leaveType = 'Half Day (' . ($leave['l_halfday_time'] ?? '') . ')';
-                    elseif (($leave['l_is_hourly'] ?? '') === 'Yes') $leaveType = 'Hourly (' . ($leave['l_hourly_time'] ?? '') . ')';
+                    if (($leave['l_is_halfday'] ?? '') === 'Yes') {
+                        $leaveType = 'Yes - ' . ($leave['l_halfday_time'] ?? '');
+                    } elseif (($leave['l_is_hourly'] ?? '') === 'Yes') {
+                        $hrs = number_format((float)($leave['l_hourly_time_hour'] ?? 0), 2);
+                        $leaveType = 'Yes - ' . ($leave['l_hourly_time'] ?? '') . '<br><b>' . $hrs . ' Hrs</b>';
+                    }
                     $row[] = $leaveType;
 
                     // # of Days
@@ -293,7 +297,7 @@ class Api extends BaseController
                     $row[] = $days;
 
                     // Action
-                    $row[] = '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ')" class="btn btn-success btn-xs">Manage</a>';
+                    $row[] = '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ')" class="btn btn-success btn-xs" title="Manage"><i class="fa fa-eye"></i></a>';
                     $data[] = $row;
                 }
 
@@ -1389,7 +1393,8 @@ class Api extends BaseController
         // Get total count
         $totalRecords = $builder->countAllResults(false);
 
-        // Get filtered data
+        // Get filtered data - order by p_number ASC (matches CI3)
+        $builder->orderBy('P.p_number', 'ASC');
         $projects = $builder->get()->getResultArray();
 
         // Format data for DataTables
@@ -1497,8 +1502,8 @@ class Api extends BaseController
                 'u_leader' => $request->getPost('u_leader') ?? 0,
                 'u_salary' => $request->getPost('u_salary') ?? 0,
                 'u_app_auth' => $request->getPost('u_app_auth') ?? '0',
-                'u_join_date' => !empty($request->getPost('u_join_date')) ? convert_display2db($request->getPost('u_join_date')) : date('Y-m-d'),
-                'u_leave_date' => !empty($request->getPost('u_leave_date')) ? convert_display2db($request->getPost('u_leave_date')) : '0000-00-00',
+                'u_join_date' => !empty($request->getPost('u_join_date')) ? convert_display2db($request->getPost('u_join_date')) : null,
+                'u_leave_date' => !empty($request->getPost('u_leave_date')) ? convert_display2db($request->getPost('u_leave_date')) : null,
                 'u_comments' => $request->getPost('u_comments') ?? '',
             ];
 
@@ -1586,6 +1591,17 @@ class Api extends BaseController
             if ($user) {
                 $photoPath = ROOTPATH . 'assets/logos/ulogo_' . $u_id . '.jpg';
                 $user['u_photo'] = file_exists($photoPath) ? base_url('assets/logos/ulogo_' . $u_id . '.jpg') : '';
+                // Convert dates from Y-m-d (DB) to d-m-Y (display) for datepicker
+                if (!empty($user['u_join_date']) && $user['u_join_date'] !== '0000-00-00') {
+                    $user['u_join_date'] = date('d-m-Y', strtotime($user['u_join_date']));
+                } else {
+                    $user['u_join_date'] = '';
+                }
+                if (!empty($user['u_leave_date']) && $user['u_leave_date'] !== '0000-00-00') {
+                    $user['u_leave_date'] = date('d-m-Y', strtotime($user['u_leave_date']));
+                } else {
+                    $user['u_leave_date'] = '';
+                }
                 echo json_encode([
                     'status' => 'pass',
                     'data' => $user
@@ -2203,7 +2219,8 @@ class Api extends BaseController
                     }
                     $msgHtml .= ($leave['l_message'] ?? '');
 
-                    $imgUrl = '';
+                    $photoPath = ROOTPATH . 'assets/logos/ulogo_' . $leave['l_u_id'] . '.jpg';
+                    $imgUrl = file_exists($photoPath) ? base_url('assets/logos/ulogo_' . $leave['l_u_id'] . '.jpg') : '';
 
                     echo json_encode([
                         'status' => 'pass',
@@ -2266,8 +2283,10 @@ class Api extends BaseController
             $row[] = isset($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '';
             $row[] = $leave['l_message'] ?? '';
             $row[] = $leave['l_status'] ?? '';
-            $row[] = ($leave['l_is_halfday'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_halfday_time'] ?? '') . ')' : 'No';
-            $row[] = ($leave['l_is_hourly'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_hourly_time'] ?? '') . ')' : 'No';
+            $row[] = ($leave['l_is_halfday'] ?? '') === 'Yes' ? 'Yes - ' . ($leave['l_halfday_time'] ?? '') : 'No';
+            $row[] = ($leave['l_is_hourly'] ?? '') === 'Yes'
+                ? 'Yes - ' . ($leave['l_hourly_time'] ?? '') . '<br><b>' . number_format((float)($leave['l_hourly_time_hour'] ?? 0), 2) . ' Hrs</b>'
+                : 'No';
 
             // Action buttons
             $actions = '<div class="actions">';

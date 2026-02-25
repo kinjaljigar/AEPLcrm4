@@ -256,7 +256,7 @@ if (!function_exists('MakeTime')) {
      */
     function MakeTime(): void
     {
-        for ($i = 420; $i <= 1380; $i = $i + 15) {
+        for ($i = 60; $i <= 1440; $i = $i + 15) {
             $h = (int)($i / 60);
             $m = $i % 60;
             if ($m == 0) {

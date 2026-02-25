@@ -152,15 +152,28 @@ class Home extends BaseController
                 ->orderBy('PM.pm_datetime', 'DESC')
                 ->limit(20);
 
+            // if ($u_type == 'Project Leader') {
+            //     $msgBuilder->groupStart()
+            //         ->where('PM.pm_created_by', $u_id)
+            //         ->orWhereIn('PM.pm_id', function($subquery) use ($u_id) {
+            //             return $subquery->select('pmu_pm_id')
+            //                 ->from('aa_project_message_users')
+            //                 ->where('pmu_u_id', $u_id);
+            //         })
+            //         ->groupEnd();
+            // }
             if ($u_type == 'Project Leader') {
                 $msgBuilder->groupStart()
                     ->where('PM.pm_created_by', $u_id)
-                    ->orWhereIn('PM.pm_id', function($subquery) use ($u_id) {
+                    ->orWhereIn('PM.pm_id', function ($subquery) use ($u_id) {
                         return $subquery->select('pmu_pm_id')
                             ->from('aa_project_message_users')
                             ->where('pmu_u_id', $u_id);
                     })
                     ->groupEnd();
+
+                // ✅ ADD THIS CONDITION (IMPORTANT)
+                $msgBuilder->where("FIND_IN_SET($u_id, P.p_leader) >", 0, false);
             }
 
             $messages = $msgBuilder->get()->getResultArray();
@@ -627,6 +640,27 @@ class Home extends BaseController
 
     public function leaves()
     {
+        $db = \Config\Database::connect();
+        $u_type = $this->admin_session['u_type'] ?? '';
+        $u_id   = $this->admin_session['u_id'] ?? 0;
+
+        $countSql = "SELECT L.l_status, COUNT(*) as cnt FROM aa_leaves L
+            LEFT JOIN aa_users U ON L.l_u_id = U.u_id";
+        if ($u_type === 'Project Leader') {
+            $countSql .= " WHERE U.u_leader = " . intval($u_id);
+        }
+        $countSql .= " GROUP BY L.l_status";
+
+        $leave_counts = ['Pending' => 0, 'Approved' => 0, 'Declined' => 0];
+        try {
+            foreach ($db->query($countSql)->getResultArray() as $row) {
+                $leave_counts[$row['l_status']] = (int)$row['cnt'];
+            }
+        } catch (\Exception $e) {
+            // use defaults
+        }
+
+        $this->view_data['leave_counts'] = $leave_counts;
         $this->view_data['page'] = 'leaves';
         $this->view_data['meta_title'] = 'Leave Request';
         $this->view_data['admin_session'] = $this->admin_session;
