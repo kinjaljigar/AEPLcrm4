@@ -134,7 +134,7 @@ class Home extends BaseController
                 LEFT JOIN aa_users u ON u.u_id = w.leader_id
                 WHERE 1=1";
             if ($leader_id) $sql .= " AND w.leader_id = " . intval($leader_id);
-            $sql .= " ORDER BY w.w_id DESC LIMIT 5";
+            $sql .= " ORDER BY u.u_name DESC, w.w_id DESC LIMIT 5";
             $this->view_data['weekly_works'] = $db->query($sql)->getResultArray();
         } catch (\Exception $e) {
             log_message('error', 'Dashboard weekly_works error: ' . $e->getMessage());
@@ -591,15 +591,29 @@ class Home extends BaseController
 
     public function fetchMessages()
     {
-        $messageModel = new MessageModel();
-        $params = [
-            'u_id' => $this->admin_session['u_id'],
-            'conditions' => [['mu_read' => 0]]
-        ];
-        $messages = $messageModel->getRecords($params);
+        $u_id = $this->admin_session['u_id'] ?? 0;
+        $db = \Config\Database::connect();
+        $messages = [];
+        try {
+            // Query aa_message (CI3-compatible: inbox alerts shown as green/yellow on template)
+            $messages = $db->query("
+                SELECT M.me_id, M.me_text, M.me_p_id,
+                       COALESCE(M.leave_message, 'No') AS leave_message,
+                       COALESCE(M.conference_message, 'No') AS conference_message,
+                       COALESCE(M.task_message, 'No') AS task_message,
+                       P.p_name
+                FROM aa_message M
+                LEFT JOIN aa_projects P ON P.p_id = M.me_p_id
+                INNER JOIN aa_message_users MU ON MU.mu_me_id = M.me_id
+                WHERE MU.mu_u_id = " . intval($u_id) . "
+                  AND (MU.mu_read IS NULL OR MU.mu_read = 0)
+                ORDER BY M.me_id DESC
+            ")->getResultArray();
+        } catch (\Exception $e) {
+            $messages = [];
+        }
 
         $this->session->set('messages', $messages);
-
         return $this->response->setJSON($messages);
     }
 

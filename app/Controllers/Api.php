@@ -414,17 +414,22 @@ class Api extends BaseController
                     ->get()->getResultArray();
 
                 $data = [];
+                $isMasterAdmin = ($admin_session['u_type'] ?? '') === 'Master Admin';
                 foreach ($projects as $project) {
-                    // Get total expenses
-                    $expenses = $db->table('aa_project_expense')
-                        ->selectSum('pe_val')
-                        ->where('pe_p_id', $project['p_id'])
-                        ->get()->getRowArray();
-                    $total_expense = floatval($expenses['pe_val'] ?? 0);
+                    $p_id = $project['p_id'];
+                    // Salary from attendance (hours * salary rate)
+                    try {
+                        $salaryRow = $db->query("SELECT SUM(total_salary) as final_salary FROM (SELECT ((at_end - at_start) / 60 * u_salary) as total_salary FROM aa_attendance A INNER JOIN aa_users_salary U ON A.at_u_id = U.u_id WHERE at_p_id = ? AND at_date >= u_start_date AND at_date < u_end_date) as FinnalDB", [$p_id])->getRowArray();
+                        $total_salary = floatval($salaryRow['final_salary'] ?? 0);
+                    } catch (\Exception $e) {
+                        $total_salary = 0;
+                    }
+                    // Additional project expenses
+                    $expRow = $db->query("SELECT SUM(pe_val) as total_expense FROM aa_project_expense WHERE pe_p_id = ?", [$p_id])->getRowArray();
+                    $total_expense = $total_salary + floatval($expRow['total_expense'] ?? 0);
                     $p_value = floatval($project['p_value'] ?? 0);
                     $profit = $p_value - $total_expense;
 
-                    $isMasterAdmin = ($admin_session['u_type'] ?? '') === 'Master Admin';
                     $data[] = [
                         htmlspecialchars($project['p_name']),
                         !empty($project['p_created']) ? convert_db2display($project['p_created'], false) : '',
@@ -452,11 +457,17 @@ class Api extends BaseController
                 $data = [];
                 $isMasterAdmin = ($admin_session['u_type'] ?? '') === 'Master Admin';
                 foreach ($projects as $project) {
-                    $expenses = $db->table('aa_project_expense')
-                        ->selectSum('pe_val')
-                        ->where('pe_p_id', $project['p_id'])
-                        ->get()->getRowArray();
-                    $total_expense = floatval($expenses['pe_val'] ?? 0);
+                    $p_id = $project['p_id'];
+                    // Salary from attendance (hours * salary rate)
+                    try {
+                        $salaryRow = $db->query("SELECT SUM(total_salary) as final_salary FROM (SELECT ((at_end - at_start) / 60 * u_salary) as total_salary FROM aa_attendance A INNER JOIN aa_users_salary U ON A.at_u_id = U.u_id WHERE at_p_id = ? AND at_date >= u_start_date AND at_date < u_end_date) as FinnalDB", [$p_id])->getRowArray();
+                        $total_salary = floatval($salaryRow['final_salary'] ?? 0);
+                    } catch (\Exception $e) {
+                        $total_salary = 0;
+                    }
+                    // Additional project expenses
+                    $expRow = $db->query("SELECT SUM(pe_val) as total_expense FROM aa_project_expense WHERE pe_p_id = ?", [$p_id])->getRowArray();
+                    $total_expense = $total_salary + floatval($expRow['total_expense'] ?? 0);
                     $p_value = floatval($project['p_value'] ?? 0);
                     $profit = $p_value - $total_expense;
 
@@ -2152,17 +2163,69 @@ class Api extends BaseController
                     'l_approved_by' => $admin_session['u_name'],
                     'l_approved_by_id' => $admin_session['u_id'],
                 ]);
-                // Notify the leave owner
+                // Notify the leave owner (mobile push notification)
                 if ($leaveOwner && $leaveOwner['l_u_id'] != $admin_session['u_id']) {
                     $leaveDate = date('d-m-Y', strtotime($leaveOwner['l_from_date']));
-                    $db->table('aa_desktop_notification_queue')->insert([
-                        'u_id'    => $leaveOwner['l_u_id'],
-                        'title'   => 'Leave ' . $l_status,
-                        'message' => 'Your leave request for ' . $leaveDate . ' has been ' . strtolower($l_status) . ' by ' . $admin_session['u_name'],
-                        'payload' => json_encode(['screen_name' => 'Leave']),
-                        'is_sent' => 0,
-                    ]);
+                    try {
+                        $db->table('aa_desktop_notification_queue')->insert([
+                            'u_id'    => $leaveOwner['l_u_id'],
+                            'title'   => 'Leave ' . $l_status,
+                            'message' => 'Your leave request for ' . $leaveDate . ' has been ' . strtolower($l_status) . ' by ' . $admin_session['u_name'],
+                            'payload' => json_encode(['screen_name' => 'Leave']),
+                            'is_sent' => 0,
+                        ]);
+                    } catch (\Exception $e) {}
                 }
+
+                // CI3-compatible: create inbox message in aa_message for Bim Heads (shows as green alert)
+                if (($admin_session['u_type'] ?? '') === 'Project Leader') {
+                    try {
+                        $empInfo = $db->query("
+                            SELECT DISTINCT TU.tu_p_id AS projectid, U.u_name AS emp_name, U.u_department AS dept
+                            FROM aa_task2user TU
+                            INNER JOIN aa_users U ON TU.tu_u_id = U.u_id
+                            WHERE TU.tu_u_id = " . intval($leaveOwner['l_u_id'] ?? 0) . "
+                              AND TU.tu_removed = 'No'
+                            LIMIT 1
+                        ")->getRowArray();
+
+                        if ($empInfo) {
+                            $me_text = "<b>Department - " . htmlspecialchars($empInfo['dept']) . "</b><br/>"
+                                . "Leave " . $l_status . " By Project Lead - <b>" . htmlspecialchars($admin_session['u_name']) . "</b>"
+                                . " of employee - <b>" . htmlspecialchars($empInfo['emp_name']) . "</b>"
+                                . " with reason - <br/>" . htmlspecialchars($l_reply);
+
+                            $db->table('aa_message')->insert([
+                                'me_datetime'        => date('Y-m-d H:i:s'),
+                                'me_text'            => $me_text,
+                                'me_p_id'            => $empInfo['projectid'],
+                                'leave_message'      => 'Yes',
+                                'conference_message' => 'No',
+                                'task_message'       => 'No',
+                                'schedule_message'   => 'No',
+                            ]);
+                            $me_id = $db->insertID();
+
+                            // Notify all Bim Heads in the same department
+                            $bimHeads = $db->query("
+                                SELECT DISTINCT u_id FROM aa_users
+                                WHERE u_department IN ('" . $db->escapeStr($empInfo['dept']) . "', 'Admin')
+                                  AND u_type = 'Bim Head'
+                            ")->getResultArray();
+                            foreach ($bimHeads as $bh) {
+                                $db->table('aa_message_users')->insert([
+                                    'mu_me_id' => $me_id,
+                                    'mu_u_id'  => $bh['u_id'],
+                                    'mu_p_id'  => $empInfo['projectid'],
+                                    'mu_read'  => 0,
+                                ]);
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        // Don't fail approve if message creation fails
+                    }
+                }
+
                 echo json_encode(['status' => 'pass', 'message' => 'Leave ' . $l_status . ' successfully.']);
             }
             exit;
@@ -4639,13 +4702,15 @@ class Api extends BaseController
         $act = $request->getPost('act');
 
         if ($act === 'read') {
-            // Mark message as read
-            $m_id = $request->getPost('m_id');
-            if ($m_id) {
-                $db->table('aa_message_users')
-                    ->where('mu_m_id', $m_id)
-                    ->where('mu_u_id', $admin_session['u_id'])
-                    ->update(['mu_read' => 1]);
+            // Mark message as read (template sends me_id, column is mu_me_id)
+            $me_id = $request->getPost('me_id') ?: $request->getPost('m_id');
+            if ($me_id) {
+                try {
+                    $db->table('aa_message_users')
+                        ->where('mu_me_id', $me_id)
+                        ->where('mu_u_id', $admin_session['u_id'])
+                        ->update(['mu_read' => 1]);
+                } catch (\Exception $e) {}
             }
             echo json_encode(['status' => 'pass']);
             exit;
