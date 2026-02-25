@@ -1060,6 +1060,8 @@ class Api extends BaseController
 
                 $builder->groupBy('T.t_id');
                 $builder->orderBy('T.t_priority', 'ASC');
+                $builder->orderBy('T.t_p_id', 'ASC');
+                $builder->orderBy('T.t_id', 'ASC');
 
                 $tasks = $builder->get()->getResultArray();
                 $totalRecords = count($tasks);
@@ -1220,7 +1222,7 @@ class Api extends BaseController
                 else $work_hour_total = $fraction;
                 $nestedData[] = number_format($whole + $work_hour_total, 2);
 
-                if ($admin_session['u_type'] == 'Master Admin') {
+                if (in_array($admin_session['u_type'], ['Master Admin', 'Super Admin'])) {
                     $nestedData[] = $rec['u_salary'];
                     $nestedData[] = $rec['final_salary'] ?? 0;
                 } else {
@@ -1228,7 +1230,7 @@ class Api extends BaseController
                     $nestedData[] = 0;
                 }
                 $result[] = $nestedData;
-                if ($admin_session['u_type'] == 'Master Admin')
+                if (in_array($admin_session['u_type'], ['Master Admin', 'Super Admin']))
                     $total = $total + ($rec['final_salary'] ?? 0);
             }
             echo json_encode([
@@ -1244,7 +1246,7 @@ class Api extends BaseController
         // Handle Accounts tab (project_detail)
         if ($act === 'accounts') {
             $draw = $request->getPost('draw') ?? 1;
-            $isMasterAdmin = ($admin_session['u_type'] ?? '') === 'Master Admin';
+            $isMasterAdmin = in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Super Admin']);
             $expenses = $db->table('aa_project_expense')
                 ->where('pe_p_id', $p_id)
                 ->get()->getResultArray();
@@ -1416,19 +1418,18 @@ class Api extends BaseController
             $row[] = $project['p_name'];
             $row[] = $project['p_address'] ?? '';
 
-            // Add cost/expense/profit columns for Master Admin
-            if ($admin_session['u_type'] == 'Master Admin') {
-                // Get project value and expenses
+            // Add cost/expense/profit columns for Master Admin and Super Admin
+            if (in_array($admin_session['u_type'], ['Master Admin', 'Super Admin'])) {
                 $p_value = floatval($project['p_value'] ?? 0);
-
-                // Get total expenses
-                $expenses = $db->table('aa_project_expense')
-                    ->selectSum('pe_val')
-                    ->where('pe_p_id', $project['p_id'])
-                    ->get()
-                    ->getRowArray();
-                $total_expense = floatval($expenses['pe_val'] ?? 0);
-
+                // Salary from attendance (hours * salary rate)
+                try {
+                    $salaryRow = $db->query("SELECT SUM(total_salary) as final_salary FROM (SELECT ((at_end - at_start) / 60 * u_salary) as total_salary FROM aa_attendance A INNER JOIN aa_users_salary U ON A.at_u_id = U.u_id WHERE at_p_id = ? AND at_date >= u_start_date AND at_date < u_end_date) as FinnalDB", [$project['p_id']])->getRowArray();
+                    $total_salary = floatval($salaryRow['final_salary'] ?? 0);
+                } catch (\Exception $e) {
+                    $total_salary = 0;
+                }
+                $expRow = $db->query("SELECT SUM(pe_val) as total_expense FROM aa_project_expense WHERE pe_p_id = ?", [$project['p_id']])->getRowArray();
+                $total_expense = $total_salary + floatval($expRow['total_expense'] ?? 0);
                 $profit = $p_value - $total_expense;
 
                 $row[] = number_format($p_value, 2);
@@ -1513,8 +1514,8 @@ class Api extends BaseController
                 'u_leader' => $request->getPost('u_leader') ?? 0,
                 'u_salary' => $request->getPost('u_salary') ?? 0,
                 'u_app_auth' => $request->getPost('u_app_auth') ?? '0',
-                'u_join_date' => !empty($request->getPost('u_join_date')) ? convert_display2db($request->getPost('u_join_date')) : null,
-                'u_leave_date' => !empty($request->getPost('u_leave_date')) ? convert_display2db($request->getPost('u_leave_date')) : null,
+                'u_join_date' => !empty($request->getPost('u_join_date')) ? convert_display2db($request->getPost('u_join_date')) : '0000-00-00',
+                'u_leave_date' => !empty($request->getPost('u_leave_date')) ? convert_display2db($request->getPost('u_leave_date')) : '0000-00-00',
                 'u_comments' => $request->getPost('u_comments') ?? '',
             ];
 
@@ -1539,6 +1540,9 @@ class Api extends BaseController
                 }
                 $userData['created_at'] = date('Y-m-d H:i:s');
                 $userData['updated_at'] = date('Y-m-d H:i:s');
+                // Explicitly set u_id in case AUTO_INCREMENT is not set on the column
+                $maxRow = $db->table('aa_users')->selectMax('u_id', 'max_id')->get()->getRowArray();
+                $userData['u_id'] = (int)($maxRow['max_id'] ?? 0) + 1;
                 $db->table('aa_users')->insert($userData);
                 $u_id = $db->insertID();
             }
@@ -4508,7 +4512,7 @@ class Api extends BaseController
                         $file_name = FCPATH . 'assets/logos/plogo_' . $record['p_id'] . '.jpg';
                         $record['photo'] = file_exists($file_name) ? base_url('assets/logos/plogo_' . $record['p_id'] . '.jpg') : '';
                         $pe = '';
-                        if (in_array($admin_session['u_type'], ['Master Admin'])) {
+                        if (in_array($admin_session['u_type'], ['Master Admin', 'Super Admin'])) {
                             $pe = $db->table('aa_project_expense')
                                 ->select('pe_val, pe_lbl')
                                 ->where('pe_p_id', $p_id)
@@ -4539,12 +4543,12 @@ class Api extends BaseController
                         $nestedData[] = $rec['p_number'];
                         $nestedData[] = $rec['p_name'];
                         $nestedData[] = $rec['p_address'] ?? '';
-                        if (in_array($admin_session['u_type'], ['Master Admin'])) {
+                        if (in_array($admin_session['u_type'], ['Master Admin', 'Super Admin'])) {
                             $nestedData[] = $rec['p_value'] ?? 0;
                             // get total expense (salary + project expense)
-                            $total_salary_row = $db->query("SELECT SUM(total_salary) as final_salary FROM (SELECT ((at_end - at_start) / 60 * u_salary) as total_salary FROM aa_attendance A INNER JOIN aa_users_salary U ON A.at_u_id = U.u_id WHERE at_p_id = '{$rec['p_id']}' AND at_date >= u_start_date AND at_date < u_end_date) as FinnalDB")->getRowArray();
+                            $total_salary_row = $db->query("SELECT SUM(total_salary) as final_salary FROM (SELECT ((at_end - at_start) / 60 * u_salary) as total_salary FROM aa_attendance A INNER JOIN aa_users_salary U ON A.at_u_id = U.u_id WHERE at_p_id = ? AND at_date >= u_start_date AND at_date < u_end_date) as FinnalDB", [$rec['p_id']])->getRowArray();
                             $total_salary = $total_salary_row['final_salary'] ?? 0;
-                            $total_expense_row = $db->query("SELECT SUM(pe_val) as total_expense FROM aa_project_expense WHERE pe_p_id = '{$rec['p_id']}'")->getRowArray();
+                            $total_expense_row = $db->query("SELECT SUM(pe_val) as total_expense FROM aa_project_expense WHERE pe_p_id = ?", [$rec['p_id']])->getRowArray();
                             $total_exp = $total_salary + ($total_expense_row['total_expense'] ?? 0);
                             $nestedData[] = $total_exp;
                             $nestedData[] = ($rec['p_value'] ?? 0) - $total_exp;
@@ -4559,7 +4563,7 @@ class Api extends BaseController
 
             case 'pemployeedetail':
                 $p_id = $request->getPost('p_id');
-                $isMasterAdmin = ($admin_session['u_type'] ?? '') === 'Master Admin';
+                $isMasterAdmin = in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Super Admin']);
                 $recordsP = $db->table('aa_projects')->where('p_id', $p_id)->get()->getRowArray();
                 $records = $db->query("SELECT total_salary as final_salary, total_hrs, Username FROM (SELECT (SUM((at_end - at_start) / 60 * US.u_salary)) as total_salary, SUM((at_end - at_start) / 60) as total_hrs, U.u_id as UserId, U.u_name as Username FROM aa_attendance A INNER JOIN aa_users_salary US ON A.at_u_id = US.u_id, aa_users as U WHERE at_p_id = '{$p_id}' AND at_date >= US.u_start_date AND at_date < US.u_end_date AND U.u_id = US.u_id GROUP BY U.u_id) as FinnalDB")->getResultArray();
                 $total = 0;

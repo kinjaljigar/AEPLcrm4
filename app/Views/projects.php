@@ -61,7 +61,7 @@
                                     <th>Project Number</th>
                                     <th>Project Name</th>
                                     <th>Address</th>
-                                    <?php if ($view_data['admin_session']['u_type'] == 'Master Admin') { ?>
+                                    <?php if (in_array($view_data['admin_session']['u_type'], ['Master Admin', 'Super Admin'])) { ?>
                                         <th>Cost</th>
                                         <th>Expense</th>
                                         <th>Profit/Loss</th>

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mysql -u root aashir_new:*)",
+      "Bash(/c/xampp/mysql/bin/mysql:*)"
+    ]
+  }
+}

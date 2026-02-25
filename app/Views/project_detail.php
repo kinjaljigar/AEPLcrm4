@@ -40,7 +40,7 @@
             <ul class="nav nav-tabs">
                 <li class="active" onclick="TabTask()"><a href="#tab_1" data-toggle="tab">Tasks</a></li>
                 <li onclick="TabTeam()"><a href="#tab_2" data-toggle="tab">Team</a></li>
-                <?php if ($view_data['admin_session']['u_type'] == 'Master Admin') { ?>
+                <?php if (in_array($view_data['admin_session']['u_type'], ['Master Admin', 'Super Admin'])) { ?>
                     <li onclick="TabAccount()"><a href="#tab_3" data-toggle="tab">Accounts</a></li>
                 <?php } ?>
                 <li onclick="TabVCom()"><a href="#tab_4" data-toggle="tab">Verbal Communication</a></li>
@@ -108,7 +108,7 @@
                         </div>
                     </div>
                 </div>
-                <?php if ($view_data['admin_session']['u_type'] == 'Master Admin') { ?>
+                <?php if (in_array($view_data['admin_session']['u_type'], ['Master Admin', 'Super Admin'])) { ?>
                     <div class="tab-pane" id="tab_3">
                         <div class="row ">
                             <div class="col-md-6 col-sm-10 col-xs-12 col-md-offset-3 col-sm-offset-1">
@@ -286,7 +286,7 @@
         }
         dataTableTeam = loadDataTable('#dataTableTeam', dtConf);
     }
-    <?php if ($view_data['admin_session']['u_type'] == 'Master Admin') { ?>
+    <?php if (in_array($view_data['admin_session']['u_type'], ['Master Admin', 'Super Admin'])) { ?>
 
         function numberWithCommas(number) {
             var parts = number.toString().split(".");

@@ -228,7 +228,7 @@
         }, function(res) {
             if (res.status == 'pass') {
                 var record = res.data;
-                $("#u_leader").html(record.team_leader);
+                $("#u_leader").html('<option value="">Please select Leader</option>' + record.team_leader);
             } else {
                 showModal('ok', res.message, 'Error!', 'modal-danger', 'modal-sm');
             }

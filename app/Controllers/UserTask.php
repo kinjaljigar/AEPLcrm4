@@ -214,22 +214,40 @@ class UserTask extends BaseController
 
         if ($request->getMethod() === 'post') {
             $comment = $request->getPost('task_reason') ?? $request->getPost('t_comment') ?? '';
+            $u_id    = $this->admin_session['u_id'] ?? 0;
+            $db      = \Config\Database::connect();
 
-            $data = [
+            // Update aa_project_task_users directly in local DB (same as CI3 ProjectTaskModel::updateTask)
+            $existing = $db->table('aa_project_task_users')
+                ->where('task_id', $id)
+                ->where('u_id', $u_id)
+                ->get()->getRowArray();
+
+            $rowData = [
                 'task_completed' => '1',
                 'task_reason'    => $comment,
                 'completed_at'   => date('Y-m-d H:i:s'),
             ];
 
-            $result  = $this->callExternalApi('task/statusupdate/' . $id, 'PUT', $data);
-            $decoded = json_decode($result['body'], true) ?: [];
+            if ($existing) {
+                $db->table('aa_project_task_users')
+                    ->where('task_id', $id)
+                    ->where('u_id', $u_id)
+                    ->update($rowData);
+            } else {
+                $rowData['task_id'] = $id;
+                $rowData['u_id']    = $u_id;
+                $db->table('aa_project_task_users')->insert($rowData);
+            }
+
+            // Also fire external API for mobile app sync (best-effort)
+            try {
+                $this->callExternalApi('task/statusupdate/' . $id, 'PUT', $rowData);
+            } catch (\Exception $e) {}
 
             while (ob_get_level() > 0) { ob_end_clean(); }
             header('Content-Type: application/json');
-            echo json_encode([
-                'status'  => ($decoded['status'] ?? '') == 200 || $result['code'] == 200 ? 'pass' : 'fail',
-                'message' => $decoded['message'] ?? 'Status updated.',
-            ]);
+            echo json_encode(['status' => 'pass', 'message' => 'Task marked as completed.']);
             exit;
         }
 
