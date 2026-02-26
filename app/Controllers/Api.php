@@ -259,7 +259,7 @@ class Api extends BaseController
                     ->select('L.*, U.u_name')
                     ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
                     ->where('L.l_status', 'Pending')
-                    ->orderBy('L.l_id', 'DESC');
+                    ->orderBy('L.l_create_date', 'DESC')->orderBy('L.l_status', 'ASC');
                    // ->limit(5);
 
                 if (!empty($leaderid)) {
@@ -277,7 +277,7 @@ class Api extends BaseController
                     $row[] = !empty($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '';
 
                     // Hourly / Half Day Leave
-                    $leaveType = '';
+                    $leaveType = '-';
                     if (($leave['l_is_halfday'] ?? '') === 'Yes') {
                         $leaveType = 'Yes - ' . ($leave['l_halfday_time'] ?? '');
                     } elseif (($leave['l_is_hourly'] ?? '') === 'Yes') {
@@ -313,8 +313,9 @@ class Api extends BaseController
                 $leaderid = $request->getPost('leaderid');
                 $today = date('Y-m-d');
                 $builder = $db->table('aa_leaves L')
-                    ->select('L.*, U.u_name, U.u_department')
+                    ->select('L.*, U.u_name, U.u_department, AB.u_type as approved_by_type, AB.u_name as approved_by_name')
                     ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
+                    ->join('aa_users AB', 'L.l_approved_by_id = AB.u_id', 'left')
                     ->where('L.l_status', 'Approved')
                     ->where('L.l_from_date <=', $today)
                     ->where('L.l_to_date >=', $today)
@@ -333,7 +334,9 @@ class Api extends BaseController
                     $row[] = $leave['u_department'] ?? '';
                     $row[] = ($leave['l_is_halfday'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_halfday_time'] ?? '') . ')' : 'No';
                     $row[] = ($leave['l_is_hourly'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_hourly_time'] ?? '') . ')' : 'No';
-                    $row[] = $leave['l_approved_by'] ?? '';
+                    $approvedByName = !empty($leave['approved_by_name']) ? $leave['approved_by_name'] : ($leave['l_approved_by'] ?? '');
+                    $approvedByType = $leave['approved_by_type'] ?? '';
+                    $row[] = $approvedByName ? ($approvedByType ? $approvedByType . '<br>' : '') . '<b>' . $approvedByName . '</b>' : '';
                     $data[] = $row;
                 }
 
@@ -492,8 +495,9 @@ class Api extends BaseController
             case 'leavestoday_all':
                 $today = date('Y-m-d');
                 $leaves = $db->table('aa_leaves L')
-                    ->select('L.*, U.u_name, U.u_department')
+                    ->select('L.*, U.u_name, U.u_department, AB.u_type as approved_by_type, AB.u_name as approved_by_name')
                     ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
+                    ->join('aa_users AB', 'L.l_approved_by_id = AB.u_id', 'left')
                     ->where('L.l_status', 'Approved')
                     ->where('L.l_from_date <=', $today)
                     ->where('L.l_to_date >=', $today)
@@ -502,6 +506,9 @@ class Api extends BaseController
 
                 $data = [];
                 foreach ($leaves as $leave) {
+                    $approvedByName = !empty($leave['approved_by_name']) ? $leave['approved_by_name'] : ($leave['l_approved_by'] ?? '');
+                    $approvedByType = $leave['approved_by_type'] ?? '';
+                    $approvedByCell = $approvedByName ? ($approvedByType ? $approvedByType . '<br>' : '') . '<b>' . $approvedByName . '</b>' : '';
                     $data[] = [
                         $leave['u_name'] ?? '',
                         $leave['u_department'] ?? '',
@@ -509,7 +516,7 @@ class Api extends BaseController
                         !empty($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '',
                         ($leave['l_is_halfday'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_halfday_time'] ?? '') . ')' : 'No',
                         ($leave['l_is_hourly'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_hourly_time'] ?? '') . ')' : 'No',
-                        $leave['l_approved_by'] ?? '',
+                        $approvedByCell,
                     ];
                 }
 
@@ -2099,6 +2106,59 @@ class Api extends BaseController
 
             try {
                 if ($l_id > 0) {
+                    // Fetch existing leave BEFORE updating to check if dates changed on an approved leave
+                    $existingLeave = $db->table('aa_leaves')
+                        ->select('l_from_date, l_to_date, l_approved_by, l_approved_by_id, l_reply, l_u_id')
+                        ->where('l_id', $l_id)
+                        ->get()->getRowArray();
+
+                    // If leave was already approved and dates are changing → notify all Bim Heads (CI3 parity)
+                    if ($existingLeave && !empty($existingLeave['l_approved_by']) && !empty($existingLeave['l_reply'])) {
+                        $newFrom = !empty($leaveData['l_from_date']) ? $leaveData['l_from_date'] : '';
+                        $newTo   = !empty($leaveData['l_to_date'])   ? $leaveData['l_to_date']   : '';
+                        $datesChanged = ($existingLeave['l_from_date'] !== $newFrom || $existingLeave['l_to_date'] !== $newTo);
+                        if ($datesChanged) {
+                            try {
+                                $empUser = $db->table('aa_users')
+                                    ->select('u_name, u_department')
+                                    ->where('u_id', intval($existingLeave['l_u_id']))
+                                    ->get()->getRowArray();
+                                if ($empUser) {
+                                    $me_text = "<b>Department - " . htmlspecialchars($empUser['u_department']) . "</b><br/>"
+                                        . "<b>Leave Date Updated By - " . htmlspecialchars($empUser['u_name']) . "</b><br/>"
+                                        . "Message: " . htmlspecialchars($leaveData['l_message'] ?? '') . "<br/>"
+                                        . "Existing: " . date('d-m-Y', strtotime($existingLeave['l_from_date'])) . " to " . date('d-m-Y', strtotime($existingLeave['l_to_date'])) . "<br/>"
+                                        . "New: " . ($newFrom ? date('d-m-Y', strtotime($newFrom)) : '') . " to " . ($newTo ? date('d-m-Y', strtotime($newTo)) : '');
+
+                                    $nextMeId = (int)($db->query("SELECT COALESCE(MAX(me_id), 0) + 1 AS next_id FROM aa_message")->getRowArray()['next_id'] ?? 1);
+                                    $db->table('aa_message')->insert([
+                                        'me_id'              => $nextMeId,
+                                        'me_datetime'        => date('Y-m-d H:i:s'),
+                                        'me_text'            => $me_text,
+                                        'me_p_id'            => 0,
+                                        'leave_message'      => 'Yes',
+                                        'conference_message' => 'No',
+                                        'task_message'       => 'No',
+                                        'schedule_message'   => 'No',
+                                    ]);
+                                    $bimHeads = $db->query("SELECT u_id FROM aa_users WHERE u_type = 'Bim Head' AND u_status = 'Active'")->getResultArray();
+                                    $nextMuId = (int)($db->query("SELECT COALESCE(MAX(mu_id), 0) + 1 AS next_id FROM aa_message_users")->getRowArray()['next_id'] ?? 1);
+                                    foreach ($bimHeads as $bh) {
+                                        $db->table('aa_message_users')->insert([
+                                            'mu_id'    => $nextMuId++,
+                                            'mu_me_id' => $nextMeId,
+                                            'mu_u_id'  => $bh['u_id'],
+                                            'mu_p_id'  => 0,
+                                            'mu_read'  => 0,
+                                        ]);
+                                    }
+                                }
+                            } catch (\Exception $e) {
+                                // Don't fail save if message creation fails
+                            }
+                        }
+                    }
+
                     // Reset status to Pending so it goes back for approval
                     $leaveData['l_status'] = 'Pending';
                     $leaveData['l_approved_by'] = '';
@@ -2160,6 +2220,16 @@ class Api extends BaseController
 
                 $l_status = $request->getPost('l_status');
                 $l_reply = $request->getPost('l_reply') ?? '';
+
+                if (!in_array($l_status, ['Approved', 'Declined'])) {
+                    echo json_encode(['status' => 'fail', 'type' => 'popup', 'message' => 'Please select Approve or Decline.']);
+                    exit;
+                }
+                if (empty(trim($l_reply))) {
+                    echo json_encode(['status' => 'fail', 'type' => 'popup', 'message' => 'Reply / comment is required.']);
+                    exit;
+                }
+
                 $leaveOwner = $db->table('aa_leaves')->select('l_u_id, l_from_date, l_to_date')->where('l_id', $l_id)->get()->getRowArray();
                 $db->table('aa_leaves')->where('l_id', $l_id)->update([
                     'l_status' => $l_status,
@@ -2184,43 +2254,57 @@ class Api extends BaseController
                 // CI3-compatible: create inbox message in aa_message for Bim Heads (shows as green alert)
                 if (($admin_session['u_type'] ?? '') === 'Project Leader') {
                     try {
-                        $empInfo = $db->query("
-                            SELECT DISTINCT TU.tu_p_id AS projectid, U.u_name AS emp_name, U.u_department AS dept
-                            FROM aa_task2user TU
-                            INNER JOIN aa_users U ON TU.tu_u_id = U.u_id
-                            WHERE TU.tu_u_id = " . intval($leaveOwner['l_u_id'] ?? 0) . "
-                              AND TU.tu_removed = 'No'
-                            LIMIT 1
-                        ")->getRowArray();
+                        // Get employee info directly from aa_users (not dependent on task assignments)
+                        $empUser = $db->table('aa_users')
+                            ->select('u_name, u_department')
+                            ->where('u_id', intval($leaveOwner['l_u_id'] ?? 0))
+                            ->get()->getRowArray();
 
-                        if ($empInfo) {
-                            $me_text = "<b>Department - " . htmlspecialchars($empInfo['dept']) . "</b><br/>"
-                                . "Leave " . $l_status . " By Project Lead - <b>" . htmlspecialchars($admin_session['u_name']) . "</b>"
-                                . " of employee - <b>" . htmlspecialchars($empInfo['emp_name']) . "</b>"
-                                . " with reason - <br/>" . htmlspecialchars($l_reply);
+                        if ($empUser) {
+                            // Get a project ID for context (optional, use 0 if none found)
+                            $projectRow = $db->table('aa_task2user')
+                                ->select('tu_p_id')
+                                ->where('tu_u_id', intval($leaveOwner['l_u_id'] ?? 0))
+                                ->where('tu_removed', 'No')
+                                ->limit(1)
+                                ->get()->getRowArray();
+                            $me_p_id = $projectRow['tu_p_id'] ?? 0;
 
+                            $leaveFromDate = !empty($leaveOwner['l_from_date']) ? date('d-m-Y', strtotime($leaveOwner['l_from_date'])) : '';
+                            $leaveToDate   = !empty($leaveOwner['l_to_date'])   ? date('d-m-Y', strtotime($leaveOwner['l_to_date']))   : '';
+
+                            $me_text = "<b>Department - " . htmlspecialchars($empUser['u_department']) . "</b><br/>"
+                                . "Leave <b>" . $l_status . "</b> By Project Lead - <b>" . htmlspecialchars($admin_session['u_name']) . "</b>"
+                                . " of employee - <b>" . htmlspecialchars($empUser['u_name']) . "</b>"
+                                . " (" . $leaveFromDate . ($leaveToDate && $leaveToDate !== $leaveFromDate ? " to " . $leaveToDate : "") . ")"
+                                . "<br/>Reason: " . htmlspecialchars($l_reply);
+
+                            $nextMeId = (int)($db->query("SELECT COALESCE(MAX(me_id), 0) + 1 AS next_id FROM aa_message")->getRowArray()['next_id'] ?? 1);
                             $db->table('aa_message')->insert([
+                                'me_id'              => $nextMeId,
                                 'me_datetime'        => date('Y-m-d H:i:s'),
                                 'me_text'            => $me_text,
-                                'me_p_id'            => $empInfo['projectid'],
+                                'me_p_id'            => $me_p_id,
                                 'leave_message'      => 'Yes',
                                 'conference_message' => 'No',
                                 'task_message'       => 'No',
                                 'schedule_message'   => 'No',
                             ]);
-                            $me_id = $db->insertID();
+                            $me_id = $nextMeId;
 
-                            // Notify all Bim Heads in the same department
+                            // Notify all Bim Heads only (leave messages do not disturb Master/Super Admins)
                             $bimHeads = $db->query("
-                                SELECT DISTINCT u_id FROM aa_users
-                                WHERE u_department IN ('" . $db->escapeStr($empInfo['dept']) . "', 'Admin')
-                                  AND u_type = 'Bim Head'
+                                SELECT u_id FROM aa_users
+                                WHERE u_type = 'Bim Head'
+                                  AND u_status = 'Active'
                             ")->getResultArray();
+                            $nextMuId = (int)($db->query("SELECT COALESCE(MAX(mu_id), 0) + 1 AS next_id FROM aa_message_users")->getRowArray()['next_id'] ?? 1);
                             foreach ($bimHeads as $bh) {
                                 $db->table('aa_message_users')->insert([
+                                    'mu_id'    => $nextMuId++,
                                     'mu_me_id' => $me_id,
                                     'mu_u_id'  => $bh['u_id'],
-                                    'mu_p_id'  => $empInfo['projectid'],
+                                    'mu_p_id'  => $me_p_id,
                                     'mu_read'  => 0,
                                 ]);
                             }
@@ -2324,8 +2408,9 @@ class Api extends BaseController
 
         // Handle DataTables list request
         $builder = $db->table('aa_leaves L');
-        $builder->select('L.*, U.u_name as employee_name, U.u_leader');
+        $builder->select('L.*, L.l_status AS leave_status_explicit, U.u_name as employee_name, U.u_leader, AB.u_type as approved_by_type, AB.u_name as approved_by_name');
         $builder->join('aa_users U', 'L.l_u_id = U.u_id', 'left');
+        $builder->join('aa_users AB', 'L.l_approved_by_id = AB.u_id', 'left');
 
         // Non-admin users only see their own leaves
         if (($admin_session['u_type'] ?? '') === 'Project Leader') {
@@ -2349,7 +2434,20 @@ class Api extends BaseController
             $row[] = isset($leave['l_from_date']) ? convert_db2display($leave['l_from_date'], false) : '';
             $row[] = isset($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '';
             $row[] = $leave['l_message'] ?? '';
-            $row[] = $leave['l_status'] ?? '';
+            // Use explicit alias first (avoids L.* shadowing with double aa_users JOIN)
+            $status = $leave['leave_status_explicit'] ?? $leave['l_status'] ?? '';
+            $approvedByType = $leave['approved_by_type'] ?? '';
+            $approvedByName = !empty($leave['approved_by_name']) ? $leave['approved_by_name'] : ($leave['l_approved_by'] ?? '');
+            if (in_array($status, ['Approved', 'Declined'])) {
+                if ($approvedByName) {
+                    $status .= '<br><small>By: ' . ($approvedByType ? $approvedByType . ' - ' : '') . '<b>' . $approvedByName . '</b></small>';
+                }
+            } elseif (empty($status) && $approvedByName) {
+                // Records where l_status was corrupted (stored as empty by old JS bug)
+                $status = '<span class="label label-warning">Processed</span>';
+                $status .= '<br><small>By: ' . ($approvedByType ? $approvedByType . ' - ' : '') . '<b>' . $approvedByName . '</b></small>';
+            }
+            $row[] = $status;
             $row[] = ($leave['l_is_halfday'] ?? '') === 'Yes' ? 'Yes - ' . ($leave['l_halfday_time'] ?? '') : 'No';
             $row[] = ($leave['l_is_hourly'] ?? '') === 'Yes'
                 ? 'Yes - ' . ($leave['l_hourly_time'] ?? '') . '<br><b>' . number_format((float)($leave['l_hourly_time_hour'] ?? 0), 2) . ' Hrs</b>'
@@ -2996,8 +3094,14 @@ class Api extends BaseController
                         echo json_encode(['status' => 'fail', 'message' => 'Selected record is not available.']);
                     }
                 } else {
-                    $at_start_sdate = convert_display2db($request->getPost('at_start_sdate'));
-                    $at_date = convert_display2db($request->getPost('at_date'));
+                    $at_start_sdate_raw = $request->getPost('at_start_sdate');
+                    $at_date_raw = $request->getPost('at_date');
+                    if (empty($at_start_sdate_raw) || empty($at_date_raw)) {
+                        echo json_encode(['status' => 'pass', 'message' => '', 'total_hrs' => '<b>Total Hours Worked : 0 hr</b>']);
+                        exit;
+                    }
+                    $at_start_sdate = convert_display2db($at_start_sdate_raw);
+                    $at_date = convert_display2db($at_date_raw);
                     $result = $db->query("SELECT u_name, u_id, SUM(whours) as work_hours FROM (SELECT u_name, u_id, ((at_end - at_start) / 60) as whours FROM aa_users U INNER JOIN aa_attendance ATT ON U.u_id = ATT.at_u_id AND ATT.at_date BETWEEN '{$at_start_sdate}' AND '{$at_date}' WHERE u_id = '{$at_u_id}') AS DB2 GROUP BY u_id")->getResultArray();
                     if (!empty($result)) {
                         $n = $result[0]['work_hours'];
@@ -3563,11 +3667,11 @@ class Api extends BaseController
                         $builder->where('WD.created_by', $u_id);
                     } elseif ($createdby === 'assigned') {
                         $builder->where('WD.created_by !=', $u_id);
-                        $builder->like('WD.dep_leader_ids', $u_id);
+                        $builder->where("FIND_IN_SET('" . (int)$u_id . "', WD.dep_leader_ids) > 0");
                     } elseif ($createdby === 'myall' || empty($createdby)) {
                         $builder->groupStart()
                             ->where('WD.created_by', $u_id)
-                            ->orLike('WD.dep_leader_ids', $u_id)
+                            ->orWhere("FIND_IN_SET('" . (int)$u_id . "', WD.dep_leader_ids) > 0")
                         ->groupEnd();
                     }
                     // 'all' = no additional filter within assigned projects
@@ -3577,11 +3681,11 @@ class Api extends BaseController
                         $builder->where('WD.created_by', $u_id);
                     } elseif ($createdby === 'assigned') {
                         $builder->where('WD.created_by !=', $u_id);
-                        $builder->like('WD.dep_leader_ids', $u_id);
+                        $builder->where("FIND_IN_SET('" . (int)$u_id . "', WD.dep_leader_ids) > 0");
                     } elseif ($createdby === 'myall') {
                         $builder->groupStart()
                             ->where('WD.created_by', $u_id)
-                            ->orLike('WD.dep_leader_ids', $u_id)
+                            ->orWhere("FIND_IN_SET('" . (int)$u_id . "', WD.dep_leader_ids) > 0")
                         ->groupEnd();
                     }
                     // 'all' or empty = no filter, see everything
@@ -3589,7 +3693,7 @@ class Api extends BaseController
                     // Other roles: only their own or assigned to them
                     $builder->groupStart()
                         ->where('WD.created_by', $u_id)
-                        ->orLike('WD.dep_leader_ids', $u_id)
+                        ->orWhere("FIND_IN_SET('" . (int)$u_id . "', WD.dep_leader_ids) > 0")
                     ->groupEnd();
                 }
 
@@ -3608,7 +3712,7 @@ class Api extends BaseController
                 if (!empty($leader)) {
                     $builder->groupStart()
                         ->where('WD.created_by', $leader)
-                        ->orLike('WD.dep_leader_ids', $leader)
+                        ->orWhere("FIND_IN_SET('" . (int)$leader . "', WD.dep_leader_ids) > 0")
                     ->groupEnd();
                 }
                 if (!empty($from_date)) {
@@ -3723,7 +3827,7 @@ class Api extends BaseController
                             'u_id' => $work['leader_id'],
                             'title' => $title,
                             'message' => $msg,
-                            'payload' => json_encode(['screen_name' => 'Dependencies']),
+                            'payload' => json_encode(['screen_name' => 'Dependency']),
                             'is_sent' => 0,
                         ]);
                     }
@@ -4217,15 +4321,25 @@ class Api extends BaseController
 
             case 'estimated_actual':
                 $txt_p_status = $request->getPost('txt_p_status');
-                $records = $db->query("SELECT P.p_id, P.p_name, COALESCE(SUM(T.t_hours), 0) as t_hours, COALESCE(SUM(T.t_hours_planned), 0) as t_hours_planned, COALESCE(SUM(T.t_hours_total), 0) as t_hours_total FROM aa_projects P LEFT JOIN aa_tasks T ON T.t_p_id = P.p_id AND T.t_parent = 0" . ($txt_p_status ? " WHERE P.p_status = '{$txt_p_status}'" : "") . " GROUP BY P.p_id ORDER BY P.p_name ASC")->getResultArray();
+                $txt_search = $request->getPost('txt_search');
+                $whereArr = [];
+                if ($txt_p_status) {
+                    $whereArr[] = "P.p_status = '" . $db->escapeStr($txt_p_status) . "'";
+                }
+                if ($txt_search) {
+                    $s = $db->escapeStr($txt_search);
+                    $whereArr[] = "(P.p_name LIKE '%{$s}%' OR P.p_number LIKE '%{$s}%')";
+                }
+                $whereClause = $whereArr ? ' WHERE ' . implode(' AND ', $whereArr) : '';
+                $records = $db->query("SELECT P.p_id, P.p_number, P.p_name, COALESCE(SUM(T.t_hours), 0) as t_hours, COALESCE(SUM(T.t_hours_planned), 0) as t_hours_planned, COALESCE(SUM(T.t_hours_total), 0) as t_hours_total FROM aa_projects P LEFT JOIN aa_tasks T ON T.t_p_id = P.p_id AND T.t_parent = 0" . $whereClause . " GROUP BY P.p_id ORDER BY P.p_number ASC")->getResultArray();
                 $data = [];
                 foreach ($records as $rec) {
                     $row = [];
-                    $row[] = $rec['p_name'];
+                    $row[] = ($rec['p_number'] ? $rec['p_number'] . ' - ' : '') . $rec['p_name'];
                     $row[] = $rec['t_hours'] ?? 0;
                     $row[] = $rec['t_hours_planned'] ?? 0;
                     $row[] = number_format($this->convertHours($rec['t_hours_total']), 2);
-                    $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showData(\'' . $rec['p_id'] . '\', \'' . $rec['p_name'] . '\')"><i class="fa fa-eye"></i></a>';
+                    $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showData(\'' . $rec['p_id'] . '\', \'' . addslashes($rec['p_name']) . '\')"><i class="fa fa-eye"></i></a>';
                     $data[] = $row;
                 }
                 echo json_encode(['draw' => intval($draw), 'recordsTotal' => count($data), 'recordsFiltered' => count($data), 'data' => $data]);

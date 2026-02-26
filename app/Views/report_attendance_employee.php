@@ -157,30 +157,25 @@
                                 doc.styles.tableHeader.fontSize = 11;
                                 doc.pageMargins = [5, 5, 5, 5];
 
-                                var table = doc.content[1].table;
-                                var columnCount = table.body[0].length;
-
-                                var widths = [];
-
-                                for (var i = 0; i < columnCount; i++) {
-
-                                    if (i === 0) {
-                                        widths.push('3%');
-                                    }
-                                    
-                                    else if (i === 1) {
-                                        widths.push('15%');
-                                    }
-                                    else if (i === columnCount - 1) {
-                                        widths.push('8%');
-                                    }
-                                    
-                                    else {
-                                        widths.push('2.3%');
+                                // Find the table content dynamically
+                                var tableContent = null;
+                                for (var i = 0; i < doc.content.length; i++) {
+                                    if (doc.content[i] && doc.content[i].table) {
+                                        tableContent = doc.content[i].table;
+                                        break;
                                     }
                                 }
+                                if (!tableContent || !tableContent.body || !tableContent.body[0]) return;
 
-                                table.widths = widths;
+                                var columnCount = tableContent.body[0].length;
+                                var widths = [];
+                                for (var i = 0; i < columnCount; i++) {
+                                    if (i === 0) widths.push('3%');
+                                    else if (i === 1) widths.push('15%');
+                                    else if (i === columnCount - 1) widths.push('8%');
+                                    else widths.push('2.3%');
+                                }
+                                tableContent.widths = widths;
                             }
                         },
                         'print'

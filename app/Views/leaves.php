@@ -376,7 +376,7 @@ function saveLeave() {
         },
 
     };
-    var form = setValidation('#leave_form', rules);
+    var form = setValidation('#admin_add_form', rules);
     var isValid = form.valid();
     if (isValid == true) {
         var formData = form.serializeArray();
@@ -392,7 +392,7 @@ function saveLeave() {
                     });
             } else {
                 if (res.type != 'undefined' && res.type == 'popup') {
-                    showMessage(res.message, 'leave_form', 'error_message', 'danger', true);
+                    showMessage(res.message, 'admin_add_form', 'error_message', 'danger', true);
                     $('#sbModel').animate({
                         scrollTop: 0
                     }, 'slow');
@@ -426,7 +426,7 @@ function deleteRecord(id) {
 
 function Approve(id, act) {
     var id = id == 'undefined' ? 0 : id;
-    var html = '<form class="formclass" id="leave_form" name="leave_form" enctype="multipart/form-data">';
+    var html = '<form class="formclass" id="admin_add_form" name="admin_add_form" enctype="multipart/form-data">';
     html += $('.leave_form').html();
     html += '</form>';
     if (parseInt(id) > 0) {
@@ -437,11 +437,17 @@ function Approve(id, act) {
             if (res.status == 'pass') {
                 var record = res.data;
                 showModal('html', html, 'Manage Leave', 'modal', 'modal-md', function() {
-                    $('#leave_form').find('#l_id').val(record.l_id);
+                    // Move footer buttons outside modal-body so they're always visible
+                    var footerHtml = $('#sbModel .modal-body .box-footer').html();
+                    $('#sbModel .modal-body .box-footer').remove();
+                    $('#sbModel .modal-content').append('<div class="modal-footer">' + footerHtml + '</div>');
+                    $('#sbModel .modal-body').css({'max-height': '65vh', 'overflow-y': 'auto'});
+
+                    $('#admin_add_form').find('#l_id').val(record.l_id);
                     $.each(record, function(key, value) {
-                        $('#leave_form').find('#' + key).html(value);
+                        $('#admin_add_form').find('#' + key).html(value);
                     });
-                    $('#leave_form').find('#img_url').attr("src", res.img_url);
+                    $('#admin_add_form').find('#img_url').attr("src", res.img_url);
                 });
             } else {
                 showModal('ok', res.message, 'Error!', 'modal-danger', 'modal-sm');

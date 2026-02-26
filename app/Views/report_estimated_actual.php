@@ -9,10 +9,11 @@
                 <div class="row">
                     <div class="col-md-7">
                         <input class="form-control" name="txt_search" id="txt_search"
-                            style="width:150px; display:inline" placeholder="Project Name" />
+                            style="width:180px; display:inline" placeholder="Project Name / Number" />
                         <select class="form-control" id="txt_p_status" name="txt_p_status"
                             style="width:auto; display:inline">
-                            <option value="Active">Active</option>
+                            <option value="">All</option>
+                            <option value="Active" selected>Active</option>
                             <option value="Hold">Hold</option>
                             <option value="Completed">Completed</option>
                         </select> <button type="button" id="main_add_button" onclick="LoadData();"

@@ -149,15 +149,26 @@ abstract class BaseController extends Controller
                     }
                 }
 
-                // Load unread messages count
-                // TODO: Re-enable after aa_messages table is created
-                // $messageModel = new \App\Models\MessageModel();
-                // $params = [
-                //     'u_id' => $this->admin_session['u_id'],
-                //     'conditions' => [['mu_read' => 0]]
-                // ];
-                // $messages = $messageModel->getRecords($params);
-                // $this->session->set('messages', $messages);
+                // Load unread inbox messages (leave approvals, task alerts, etc.)
+                try {
+                    $db = \Config\Database::connect();
+                    $messages = $db->query("
+                        SELECT M.me_id, M.me_text, M.me_p_id,
+                               COALESCE(M.leave_message, 'No') AS leave_message,
+                               COALESCE(M.conference_message, 'No') AS conference_message,
+                               COALESCE(M.task_message, 'No') AS task_message,
+                               P.p_name
+                        FROM aa_message M
+                        LEFT JOIN aa_projects P ON P.p_id = M.me_p_id
+                        INNER JOIN aa_message_users MU ON MU.mu_me_id = M.me_id
+                        WHERE MU.mu_u_id = " . intval($this->admin_session['u_id']) . "
+                          AND (MU.mu_read IS NULL OR MU.mu_read = 0)
+                        ORDER BY M.me_id DESC
+                    ")->getResultArray();
+                    $this->session->set('messages', $messages);
+                } catch (\Exception $e) {
+                    $this->session->set('messages', []);
+                }
             } else {
                 // Not logged in - redirect to login and stop execution
                 // Note: return redirect() in initController() does NOT stop method execution in CI4
