@@ -769,6 +769,17 @@ class Home extends BaseController
 
         $employees = $empBuilder->orderBy('u_name', 'ASC')->get()->getResultArray();
 
+        // Add the logged-in Project Leader themselves to the employee list
+        if ($u_type === 'Project Leader') {
+            $leaderInList = array_filter($employees, fn($e) => $e['u_id'] == $u_id);
+            if (empty($leaderInList)) {
+                array_unshift($employees, [
+                    'u_id'  => $this->admin_session['u_id'],
+                    'u_name' => $this->admin_session['u_name'],
+                ]);
+            }
+        }
+
         $this->view_data['projects'] = $projects;
         $this->view_data['employees'] = $employees;
         $this->view_data['page'] = 'dependency';

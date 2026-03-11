@@ -3467,9 +3467,9 @@ class Api extends BaseController
                 break;
 
             case 'edit':
-                $w_id = $request->getPost('w_id');
+                $w_id = intval($request->getPost('w_id'));
                 $work = $db->table('aa_weekly_work')->where('w_id', $w_id)->get()->getRowArray();
-                if (!$work) {
+                if (!$work || $w_id <= 0) {
                     echo json_encode(['status' => 'fail', 'message' => 'Record not found.']);
                     break;
                 }
@@ -3496,10 +3496,11 @@ class Api extends BaseController
 
             case 'update':
                 $w_id = $request->getPost('w_id');
-                if (!$w_id) {
+                if (!$w_id || intval($w_id) <= 0) {
                     echo json_encode(['status' => 'fail', 'message' => 'Invalid record.']);
                     break;
                 }
+                $w_id = intval($w_id);
 
                 $updateData = [
                     'p_id' => $request->getPost('p_id'),
@@ -4210,11 +4211,12 @@ class Api extends BaseController
 
             case 'hourly_leave':
                 // Aggregated per-employee view (5 columns)
+                // Use minute-based SUM to correctly handle H.MM stored values (e.g. 8.45 = 8h45m)
                 $qb = $db->table('aa_leaves L')
                     ->select('U.u_id, U.u_name,
-                        SUM(L.l_hourly_time_hour) AS total_hours,
-                        SUM(CASE WHEN L.l_status = "Approved" THEN L.l_hourly_time_hour ELSE 0 END) AS approved_hours,
-                        SUM(CASE WHEN L.l_status = "Declined" THEN L.l_hourly_time_hour ELSE 0 END) AS declined_hours')
+                        SUM(FLOOR(L.l_hourly_time_hour) * 60 + MOD(ROUND(L.l_hourly_time_hour * 100), 100)) AS total_minutes,
+                        SUM(CASE WHEN L.l_status = "Approved" THEN FLOOR(L.l_hourly_time_hour) * 60 + MOD(ROUND(L.l_hourly_time_hour * 100), 100) ELSE 0 END) AS approved_minutes,
+                        SUM(CASE WHEN L.l_status = "Declined" THEN FLOOR(L.l_hourly_time_hour) * 60 + MOD(ROUND(L.l_hourly_time_hour * 100), 100) ELSE 0 END) AS declined_minutes')
                     ->join('aa_users U', 'U.u_id = L.l_u_id')
                     ->where('L.l_is_hourly', 'Yes')
                     ->where('L.l_from_date >=', $rpt_start)
@@ -4227,9 +4229,9 @@ class Api extends BaseController
                 foreach ($records as $rec) {
                     $row = [];
                     $row[] = htmlspecialchars($rec['u_name']);
-                    $row[] = number_format($rec['total_hours'] ?? 0, 2);
-                    $row[] = number_format($rec['approved_hours'] ?? 0, 2);
-                    $row[] = number_format($rec['declined_hours'] ?? 0, 2);
+                    $row[] = $this->minutesToHM((int)($rec['total_minutes'] ?? 0));
+                    $row[] = $this->minutesToHM((int)($rec['approved_minutes'] ?? 0));
+                    $row[] = $this->minutesToHM((int)($rec['declined_minutes'] ?? 0));
                     $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showData(\'' . $rec['u_id'] . '\', \'' . addslashes($rec['u_name']) . '\', \'' . $rpt_start . '\', \'' . $rpt_end . '\')"><i class="fa fa-eye"></i></a>';
                     $data[] = $row;
                 }
@@ -4253,7 +4255,7 @@ class Api extends BaseController
                     $row[] = date("d-m-Y", strtotime($rec['l_create_date']));
                     $row[] = date("d-m-Y", strtotime($rec['l_from_date']));
                     $row[] = date("d-m-Y", strtotime($rec['l_to_date']));
-                    $row[] = number_format($rec['l_hourly_time_hour'] ?? 0, 2);
+                    $row[] = $this->minutesToHM($this->hmToMinutes($rec['l_hourly_time_hour'] ?? 0));
                     $row[] = $rec['l_status'];
                     $row[] = $rec['l_hourly_time'] ?? '';
                     $row[] = '<a href="javascript://" class="btn btn-success btn-md" onClick="showData(\'' . $rec['l_u_id'] . '\', \'' . addslashes($rec['u_name']) . '\', \'' . $rpt_start . '\', \'' . $rpt_start . '\')"><i class="fa fa-eye"></i></a>';
@@ -4274,21 +4276,21 @@ class Api extends BaseController
                     ->where('L.l_to_date <=', $rpt_end)
                     ->get()->getResultArray();
                 $data = [];
-                $total_hrs = 0;
+                $totalMinutes = 0;
                 foreach ($records as $rec) {
-                    $total_hrs += $rec['l_hourly_time_hour'] ?? 0;
+                    $totalMinutes += $this->hmToMinutes($rec['l_hourly_time_hour'] ?? 0);
                     $row = [];
                     $row[] = $user['u_name'] ?? '';
                     $row[] = date("d-m-Y", strtotime($rec['l_create_date']));
                     $row[] = date("d-m-Y", strtotime($rec['l_from_date']));
                     $row[] = date("d-m-Y", strtotime($rec['l_to_date']));
-                    $row[] = number_format($rec['l_hourly_time_hour'] ?? 0, 2);
+                    $row[] = $this->minutesToHM($this->hmToMinutes($rec['l_hourly_time_hour'] ?? 0));
                     $row[] = $rec['l_status'];
                     $row[] = $rec['l_hourly_time'] ?? '';
                     $row[] = $rec['l_message'] . ((!empty($rec['l_reply'])) ? "<br/><b>Reply:</b><br/>" . $rec['l_reply'] : "");
                     $data[] = $row;
                 }
-                echo json_encode(['draw' => intval($draw), 'recordsTotal' => count($data), 'recordsFiltered' => count($data), 'data' => $data, 'total_hrs' => $total_hrs]);
+                echo json_encode(['draw' => intval($draw), 'recordsTotal' => count($data), 'recordsFiltered' => count($data), 'data' => $data, 'total_hrs' => $this->minutesToHM($totalMinutes)]);
                 break;
 
             case 'total_user_leave__hour':
@@ -4803,6 +4805,21 @@ class Api extends BaseController
         elseif ($fraction == 0.25) return $whole + 0.15;
         elseif ($fraction == 0.50) return $whole + 0.30;
         else return $whole + $fraction;
+    }
+
+    // Convert H.MM decimal (e.g. 3.30 = 3h30m) to total minutes
+    private function hmToMinutes($hm): int
+    {
+        $parts = explode('.', number_format((float)$hm, 2, '.', ''));
+        return ((int)$parts[0] * 60) + (int)($parts[1] ?? 0);
+    }
+
+    // Convert total minutes to H.MM string (e.g. 210 → "3.30")
+    private function minutesToHM(int $minutes): string
+    {
+        $h = intdiv($minutes, 60);
+        $m = $minutes % 60;
+        return sprintf('%d.%02d', $h, $m);
     }
 
     public function messages()

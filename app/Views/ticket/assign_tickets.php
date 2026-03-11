@@ -60,46 +60,48 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
                     </div>
                 </div><br />
                 <table id="datatable" class="table table-bordered table-hover responsive nowrap" width="100% ">
-                    <tr>
-                        <th>Sr No</th>
-                        <th>Date</th>
-                        <th>Ticket Number</th>
-                        <th>Title</th>
-                        <th>Category</th>
-                        <th>Desktop</th>
-                        <th>Created By</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                    <?php if (!empty($tickets)): ?> <?php $serial = 1; ?>
-                        <?php foreach ($tickets as $ticket): ?>
-                            <tr>
-                                <td><?= $serial++ ?></td>
-                                <td><?= date('d M Y, h:i A', strtotime($ticket->created_at)) ?></td>
-                                <td><?= htmlspecialchars($ticket->ticket_number) ?></td>
-                                <td><?= htmlspecialchars($ticket->subject) ?></td>
-                                <td><?= htmlspecialchars($ticket->category_name) ?></td>
-                                <td><?= $ticket->desktop_number ?></td>
-                                <td><?= $ticket->created_by_name ?></td>
-                                <td><?= htmlspecialchars($ticket->status) ?></td>
-
-                                <td>
-                                    <a href="<?= site_url('ticket/view/' . $ticket->id . '?from=assign') ?>" class="btn btn-primary btn-md"><i class="fa fa-eye"></i></a>
-                                    <?php if ($ticket->status == 'open' || $ticket->status == 'pending'): ?>
-                                        <a href="<?= site_url('ticket/close/' . $ticket->id . '?from=assign') ?>" class="btn btn-success btn-md" onclick="return confirm('Are you sure you want to close this ticket?')"><i class="fa fa-close"></i></a>
-                                    <?php else: ?>
-                                        &nbsp;
-                                        <a href="<?= site_url('ticket/deleteassign/' . $ticket->id) ?>" class="btn btn-danger btn-md" onclick="return confirm('Are you sure?')"><i class="fa fa-trash"></i></a>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php else: ?>
+                    <thead>
                         <tr>
-                            <td colspan="6" style="text-align:center;">No tickets found.</td>
+                            <th>Sr No</th>
+                            <th>Date</th>
+                            <th>Ticket Number</th>
+                            <th>Title</th>
+                            <th>Category</th>
+                            <th>Desktop</th>
+                            <th>Created By</th>
+                            <th>Status</th>
+                            <th>Actions</th>
                         </tr>
-                    <?php endif; ?>
-
+                    </thead>
+                    <tbody>
+                        <?php if (!empty($tickets)): ?> <?php $serial = 1; ?>
+                            <?php foreach ($tickets as $ticket): ?>
+                                <tr>
+                                    <td><?= $serial++ ?></td>
+                                    <td><?= date('d M Y, h:i A', strtotime($ticket->created_at)) ?></td>
+                                    <td><?= htmlspecialchars($ticket->ticket_number) ?></td>
+                                    <td><?= htmlspecialchars($ticket->subject) ?></td>
+                                    <td><?= htmlspecialchars($ticket->category_name) ?></td>
+                                    <td><?= $ticket->desktop_number ?></td>
+                                    <td><?= $ticket->created_by_name ?></td>
+                                    <td><?= htmlspecialchars($ticket->status) ?></td>
+                                    <td>
+                                        <a href="<?= site_url('ticket/view/' . $ticket->id . '?from=assign') ?>" class="btn btn-primary btn-md"><i class="fa fa-eye"></i></a>
+                                        <?php if ($ticket->status == 'open' || $ticket->status == 'pending'): ?>
+                                            <a href="<?= site_url('ticket/close/' . $ticket->id . '?from=assign') ?>" class="btn btn-success btn-md" onclick="return confirm('Are you sure you want to close this ticket?')"><i class="fa fa-close"></i></a>
+                                        <?php else: ?>
+                                            &nbsp;
+                                            <a href="<?= site_url('ticket/deleteassign/' . $ticket->id) ?>" class="btn btn-danger btn-md" onclick="return confirm('Are you sure?')"><i class="fa fa-trash"></i></a>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="9" style="text-align:center;">No tickets found.</td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
                 </table>
 
             </div>
@@ -107,3 +109,22 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
     </section>
 
 </div><!-- /.content-wrapper -->
+
+<script>
+    <?php
+    $u_type = isset($view_data['admin_session']['u_type']) ? $view_data['admin_session']['u_type'] : '';
+    $show_export = in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head']);
+    ?>
+    function document_ready() {
+        $('#datatable').DataTable({
+            "paging": true,
+            "searching": true,
+            "pageLength": 100,
+            "bSort": false,
+            <?php if ($show_export): ?>
+            "dom": 'Blfrtip',
+            "buttons": ['copy', 'excel', 'pdf', 'print'],
+            <?php endif; ?>
+        });
+    }
+</script>

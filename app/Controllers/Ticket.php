@@ -440,6 +440,7 @@ class Ticket extends BaseController
         $this->view_data['status'] = $status;
         $this->view_data['from_date'] = $from_date;
         $this->view_data['to_date'] = $to_date;
+        $this->view_data['plugins'] = ['datatable' => true];
 
         return view('template', ['view_data' => $this->view_data]);
     }

@@ -715,8 +715,15 @@ $employees = $view_data['employees'];
         var isValid = form.valid();
         if (!isValid) return;
 
+        var w_id = form.find('[name="w_id"]').val();
+        if (!w_id) {
+            showModal('ok', 'Could not determine record ID. Please close and reopen the edit form.', 'Error', 'modal-danger', 'modal-sm');
+            return;
+        }
+
         var formData = new FormData(form[0]);
-        formData.append('act', 'update');
+        formData.set('act', 'update');
+        formData.set('w_id', w_id);
 
         postForm('api/weeklywork', formData, function(res) {
             if (res.status === 'pass') {
