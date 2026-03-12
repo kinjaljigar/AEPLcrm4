@@ -81,10 +81,22 @@
     var dataTable = null;
 
     function document_ready() {
+        // Restore saved search filters from sessionStorage
+        var savedProject  = sessionStorage.getItem('tasks_txt_projects');
+        var savedEmployee = sessionStorage.getItem('tasks_txt_employee');
+        var savedStatus   = sessionStorage.getItem('tasks_txt_status');
+        if (savedProject  !== null) $('#txt_projects').val(savedProject).trigger('change');
+        if (savedEmployee !== null) $('#txt_employee').val(savedEmployee);
+        if (savedStatus   !== null) $('#txt_status').val(savedStatus);
         LoadData();
     }
 
     function LoadData() {
+        // Save current filters to sessionStorage
+        sessionStorage.setItem('tasks_txt_projects', $("#txt_projects").val());
+        sessionStorage.setItem('tasks_txt_employee', $("#txt_employee").val());
+        sessionStorage.setItem('tasks_txt_status',   $("#txt_status").val());
+
         var dtConf = {
             "ajax": {
                 url: "<?php echo base_url('api/tasks'); ?>",
