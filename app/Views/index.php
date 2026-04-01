@@ -1111,6 +1111,12 @@
                             $('#leave_form').find('#' + key).html(value);
                         });
                         $('#leave_form').find('#img_url').attr("src", res.img_url);
+                        // Pre-select Approve or Decline radio based on button clicked
+                        if (act === 'Approve') {
+                            $('#leave_form').find('#l_status_a').prop('checked', true);
+                        } else if (act === 'Decline') {
+                            $('#leave_form').find('#l_status_d').prop('checked', true);
+                        }
                     });
                 } else {
                     showModal('ok', res.message, 'Error!', 'modal-danger', 'modal-sm');

@@ -34,7 +34,7 @@
                                         <div class="col-sm-12">
                                             <div class="form-group">
                                                 <label for="at_p_id">Project </label>
-                                                <select type="text" class="form-control" id="at_p_id" name="at_p_id"
+                                                <select type="text" class="form-control project-select" id="at_p_id" name="at_p_id"
                                                     onchange="SelectProject(this.value, 0)"></select>
                                             </div>
                                         </div>
@@ -106,21 +106,14 @@
     var dataTable = null;
 
     function document_ready() {
-        // showAddEditForm();
-        //setDatePicker(".date-picker", {});
-        // var PrevDay = new Date();
-        // PrevDay.setDate(PrevDay.getDate() - <?php echo $view_data['at_days_back']; ?>);
-        // setDatePicker("#admin_add_form .date-picker", {
-        //     startDate: PrevDay,
-        //     endDate: Date()
-        // });
         setDatePicker("#admin_add_form .date-picker", {});
-
+        initProjectSelect2('#at_p_id');
     }
 
     function getProjects(u_id) {
         if (!u_id) {
             $("#at_p_id").html('<option value="">Select Project</option>');
+            initProjectSelect2('#at_p_id');
             return;
         }
         doAjax('api/drop_get', 'POST', {
@@ -133,6 +126,11 @@
             if (res.status == 'pass') {
                 var record = res.data;
                 $("#at_p_id").html(record.empprojects);
+                // Reinitialize Select2 after options are loaded
+                if ($("#at_p_id").hasClass("select2-hidden-accessible")) {
+                    $("#at_p_id").select2('destroy');
+                }
+                initProjectSelect2('#at_p_id');
             } else {
                 showModal('ok', res.message, 'Error!', 'modal-danger', 'modal-sm');
             }

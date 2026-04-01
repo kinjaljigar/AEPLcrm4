@@ -297,7 +297,8 @@ class Api extends BaseController
                     $row[] = $days;
 
                     // Action
-                    $row[] = '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ')" class="btn btn-success btn-xs" title="Manage"><i class="fa fa-eye"></i></a>';
+                    $row[] = '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ',\'Approve\')" class="btn btn-success btn-xs" title="Approve"><i class="fa fa-thumbs-up"></i></a> '
+                           . '<a href="javascript://" onclick="Approve(' . $leave['l_id'] . ',\'Decline\')" class="btn btn-danger btn-xs" title="Decline"><i class="fa fa-thumbs-down"></i></a>';
                     $data[] = $row;
                 }
 
@@ -1144,8 +1145,20 @@ class Api extends BaseController
         // Handle Add/Edit
         if ($act === 'add') {
             $p_id = $p_id ?? 0;
+            $p_number = $request->getPost('p_number');
+
+            // Check unique project number
+            $dupQuery = $db->table('aa_projects')->where('p_number', $p_number);
+            if ($p_id > 0) {
+                $dupQuery->where('p_id !=', $p_id);
+            }
+            if ($dupQuery->countAllResults() > 0) {
+                echo json_encode(['status' => 'fail', 'type' => 'popup', 'message' => 'Project number is already exists.']);
+                exit;
+            }
+
             $projectData = [
-                'p_number' => $request->getPost('p_number'),
+                'p_number' => $p_number,
                 'p_name' => $request->getPost('p_name'),
                 'p_value' => $request->getPost('p_value') ?? 0,
                 'p_contact' => $request->getPost('p_contact') ?? '',
@@ -1467,7 +1480,7 @@ class Api extends BaseController
             $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $project['p_id'] . ', \'' . $admin_session['u_type'] . '\')" class="btn btn-primary btn-xs" title="Edit"><i class="fa fa-edit"></i></a> ';
             $actions .= '<a href="' . base_url('home/project_contacts/' . $project['p_id']) . '" class="btn btn-warning btn-xs" title="Project Contacts"><i class="fa fa-phone"></i></a> ';
 
-            if ($admin_session['u_type'] == 'Super Admin' || $admin_session['u_type'] == 'Master Admin') {
+            if (in_array($admin_session['u_type'], ['Super Admin', 'Master Admin', 'Bim Head'])) {
                 $actions .= '<a href="javascript://" onclick="deleteRecord(' . $project['p_id'] . ')" class="btn btn-danger btn-xs" title="Delete"><i class="fa fa-trash"></i></a>';
             }
             $actions .= '</div>';
@@ -4021,7 +4034,7 @@ class Api extends BaseController
 
             case 'Leaderempattendance':
                 $leader_id = $request->getPost('leader_id');
-                $sql = "SELECT u_name, u_id, SUM(whours) as work_hours FROM (SELECT U.u_name, U.u_id, ((ATT.at_end - ATT.at_start) / 60) AS whours FROM aa_users U INNER JOIN aa_attendance ATT ON U.u_id = ATT.at_u_id WHERE ATT.at_date BETWEEN '{$rpt_start}' AND '{$rpt_end}' AND U.u_leader = " . intval($leader_id);
+                $sql = "SELECT u_name, u_id, SUM(whours) as work_hours FROM (SELECT U.u_name, U.u_id, ((ATT.at_end - ATT.at_start) / 60) AS whours FROM aa_users U INNER JOIN aa_attendance ATT ON U.u_id = ATT.at_u_id WHERE ATT.at_date BETWEEN '{$rpt_start}' AND '{$rpt_end}' AND (U.u_leader = " . intval($leader_id) . " OR U.u_id = " . intval($leader_id) . ")";
                 if ($txt_search) $sql .= " AND U.u_name LIKE '%{$txt_search}%'";
                 $sql .= ") AS DB2 GROUP BY u_id ORDER BY u_name ASC";
                 $records = $db->query($sql)->getResultArray();
