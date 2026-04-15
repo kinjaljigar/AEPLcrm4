@@ -4,11 +4,10 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
 
 ?>
 
-<h1>Tickets</h1>
 <div class="content-wrapper">
     <!-- Content Header (Page header) -->
     <section class="content-header">
-        <h1>Add Ticket</h1>
+        <h1>My Tickets</h1>
     </section>
     <section class="content">
         <div class="box box-sbpink">
@@ -65,18 +64,20 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
                     </div>
                 </div><br />
                 <table id="datatable" class="table table-bordered table-hover responsive nowrap" width="100% ">
-                    <tr>
-                        <th>Sr No</th>
-                        <th>Date</th>
-                        <th>Ticket Number</th>
-                        <th>Title</th>
-                        <th>Category</th>
-                        <th>Desktop</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                    <?php if (!empty($tickets)): ?> <?php $serial = 1; ?>
-                        <?php foreach ($tickets as $ticket): ?>
+                    <thead>
+                        <tr>
+                            <th>Sr No</th>
+                            <th>Date</th>
+                            <th>Ticket Number</th>
+                            <th>Title</th>
+                            <th>Category</th>
+                            <th>Desktop</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php $serial = 1; foreach ($tickets as $ticket): ?>
                             <tr>
                                 <td><?= $serial++ ?></td>
                                 <td><?= date('d M Y, h:i A', strtotime($ticket->created_at)) ?></td>
@@ -85,24 +86,15 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
                                 <td><?= htmlspecialchars($ticket->category_name) ?></td>
                                 <td><?= $ticket->desktop_number ?></td>
                                 <td><?= htmlspecialchars($ticket->status) ?></td>
-
                                 <td>
                                     <a href="<?= site_url('ticket/view/' . $ticket->id . '?from=my') ?>" class="btn btn-primary btn-md"><i class="fa fa-eye"></i></a>
                                     <?php if ($ticket->status == 'open'): ?>
                                         <a href="<?= site_url('ticket/delete/' . $ticket->id) ?>" class="btn btn-danger btn-md" onclick="return confirm('Are you sure?')"><i class="fa fa-trash"></i></a>
-                                        <!-- <a href="<?= site_url('ticket/close/' . $ticket->id) ?>" onclick="return confirm('Are you sure you want to close this ticket?')">Close</a> -->
-                                    <?php else: ?>
-                                        <!-- Not able to delete -->
                                     <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
-                    <?php else: ?>
-                        <tr>
-                            <td colspan="6" style="text-align:center;">No tickets found.</td>
-                        </tr>
-                    <?php endif; ?>
-
+                    </tbody>
                 </table>
 
             </div>
@@ -110,3 +102,17 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
     </section>
 
 </div><!-- /.content-wrapper -->
+
+<script>
+    function document_ready() {
+        $('#datatable').DataTable({
+            "paging": true,
+            "searching": true,
+            "pageLength": 100,
+            "bSort": false,
+            "language": {
+                "emptyTable": "No tickets found."
+            }
+        });
+    }
+</script>

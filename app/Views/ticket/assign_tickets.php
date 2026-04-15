@@ -4,11 +4,10 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
 
 ?>
 
-<h1>Tickets</h1>
 <div class="content-wrapper">
     <!-- Content Header (Page header) -->
     <section class="content-header">
-        <h1>Add Ticket</h1>
+        <h1>Assigned Tickets</h1>
     </section>
     <section class="content">
         <div class="box box-sbpink">
@@ -74,33 +73,27 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if (!empty($tickets)): ?> <?php $serial = 1; ?>
-                            <?php foreach ($tickets as $ticket): ?>
-                                <tr>
-                                    <td><?= $serial++ ?></td>
-                                    <td><?= date('d M Y, h:i A', strtotime($ticket->created_at)) ?></td>
-                                    <td><?= htmlspecialchars($ticket->ticket_number) ?></td>
-                                    <td><?= htmlspecialchars($ticket->subject) ?></td>
-                                    <td><?= htmlspecialchars($ticket->category_name) ?></td>
-                                    <td><?= $ticket->desktop_number ?></td>
-                                    <td><?= $ticket->created_by_name ?></td>
-                                    <td><?= htmlspecialchars($ticket->status) ?></td>
-                                    <td>
-                                        <a href="<?= site_url('ticket/view/' . $ticket->id . '?from=assign') ?>" class="btn btn-primary btn-md"><i class="fa fa-eye"></i></a>
-                                        <?php if ($ticket->status == 'open' || $ticket->status == 'pending'): ?>
-                                            <a href="<?= site_url('ticket/close/' . $ticket->id . '?from=assign') ?>" class="btn btn-success btn-md" onclick="return confirm('Are you sure you want to close this ticket?')"><i class="fa fa-close"></i></a>
-                                        <?php else: ?>
-                                            &nbsp;
-                                            <a href="<?= site_url('ticket/deleteassign/' . $ticket->id) ?>" class="btn btn-danger btn-md" onclick="return confirm('Are you sure?')"><i class="fa fa-trash"></i></a>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php else: ?>
+                        <?php $serial = 1; foreach ($tickets as $ticket): ?>
                             <tr>
-                                <td colspan="9" style="text-align:center;">No tickets found.</td>
+                                <td><?= $serial++ ?></td>
+                                <td><?= date('d M Y, h:i A', strtotime($ticket->created_at)) ?></td>
+                                <td><?= htmlspecialchars($ticket->ticket_number) ?></td>
+                                <td><?= htmlspecialchars($ticket->subject) ?></td>
+                                <td><?= htmlspecialchars($ticket->category_name) ?></td>
+                                <td><?= $ticket->desktop_number ?></td>
+                                <td><?= $ticket->created_by_name ?></td>
+                                <td><?= htmlspecialchars($ticket->status) ?></td>
+                                <td>
+                                    <a href="<?= site_url('ticket/view/' . $ticket->id . '?from=assign') ?>" class="btn btn-primary btn-md"><i class="fa fa-eye"></i></a>
+                                    <?php if ($ticket->status == 'open' || $ticket->status == 'pending'): ?>
+                                        <a href="<?= site_url('ticket/close/' . $ticket->id . '?from=assign') ?>" class="btn btn-success btn-md" onclick="return confirm('Are you sure you want to close this ticket?')"><i class="fa fa-close"></i></a>
+                                    <?php else: ?>
+                                        &nbsp;
+                                        <a href="<?= site_url('ticket/deleteassign/' . $ticket->id) ?>" class="btn btn-danger btn-md" onclick="return confirm('Are you sure?')"><i class="fa fa-trash"></i></a>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
-                        <?php endif; ?>
+                        <?php endforeach; ?>
                     </tbody>
                 </table>
 
@@ -121,6 +114,9 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
             "searching": true,
             "pageLength": 100,
             "bSort": false,
+            "language": {
+                "emptyTable": "No tickets found."
+            },
             <?php if ($show_export): ?>
             "dom": 'Blfrtip',
             "buttons": ['copy', 'excel', 'pdf', 'print'],

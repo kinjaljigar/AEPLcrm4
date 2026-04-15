@@ -295,6 +295,9 @@ class Ticket extends BaseController
             ]);
         }
 
+        if ($from === 'assign') {
+            return redirect()->to('ticket/assigned');
+        }
         return redirect()->to('ticket/view/' . $id . (!empty($from) ? '?from=' . $from : ''));
     }
 
