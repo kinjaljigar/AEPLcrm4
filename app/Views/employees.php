@@ -377,7 +377,10 @@
                 formData.append(d.name, d.value);
             });
             formData.append("act", "add");
-            formData.append("logo_file", $("#admin_add_form").find("#u_photo")[0].files[0]);
+            var photoFiles = $("#admin_add_form").find("#u_photo")[0].files;
+            if (photoFiles.length > 0) {
+                formData.append("logo_file", photoFiles[0]);
+            }
             postForm('api/employees', formData, function(res) {
                 if (res.status == "pass") {
                     showModal('ok', res.message, 'Success!', 'modal-success', 'modal-sm', function() {},

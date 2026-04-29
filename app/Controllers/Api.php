@@ -1562,9 +1562,9 @@ class Api extends BaseController
                 $userData['updated_at'] = date('Y-m-d H:i:s');
                 // Explicitly set u_id in case AUTO_INCREMENT is not set on the column
                 $maxRow = $db->table('aa_users')->selectMax('u_id', 'max_id')->get()->getRowArray();
-                $userData['u_id'] = (int)($maxRow['max_id'] ?? 0) + 1;
+                $u_id = (int)($maxRow['max_id'] ?? 0) + 1;
+                $userData['u_id'] = $u_id;
                 $db->table('aa_users')->insert($userData);
-                $u_id = $db->insertID();
             }
 
             // Handle photo upload (save to root assets/logos/ to match URL)
@@ -1572,6 +1572,11 @@ class Api extends BaseController
             if ($photoFile && $photoFile->isValid() && !$photoFile->hasMoved()) {
                 $photoDir = ROOTPATH . 'assets/logos/';
                 if (!is_dir($photoDir)) mkdir($photoDir, 0777, true);
+                // Third param 'true' to overwrite existing file (CI4 throws error otherwise)
+                $existingFile = $photoDir . 'ulogo_' . $u_id . '.jpg';
+                if (file_exists($existingFile)) {
+                    unlink($existingFile);
+                }
                 $photoFile->move($photoDir, 'ulogo_' . $u_id . '.jpg');
             }
 
@@ -1624,8 +1629,10 @@ class Api extends BaseController
             $user = $userModel->find($u_id);
 
             if ($user) {
+                // Remove password from response to prevent double-hashing on save
+                unset($user['u_password']);
                 $photoPath = ROOTPATH . 'assets/logos/ulogo_' . $u_id . '.jpg';
-                $user['u_photo'] = file_exists($photoPath) ? base_url('assets/logos/ulogo_' . $u_id . '.jpg') : '';
+                $user['u_photo'] = file_exists($photoPath) ? base_url('assets/logos/ulogo_' . $u_id . '.jpg') . '?' . time() : '';
                 // Convert dates from Y-m-d (DB) to d-m-Y (display) for datepicker
                 if (!empty($user['u_join_date']) && $user['u_join_date'] !== '0000-00-00') {
                     $user['u_join_date'] = date('d-m-Y', strtotime($user['u_join_date']));
@@ -4085,11 +4092,49 @@ class Api extends BaseController
                 break;
 
             case 'leave':
-                $records = $db->query("SELECT u_name, l_u_id, SUM(CASE WHEN l_is_halfday = 'Yes' THEN 0.5 ELSE DATEDIFF(l_to_date, l_from_date) + 1 END) as final_leave FROM aa_leaves L INNER JOIN aa_users U ON U.u_id = L.l_u_id WHERE l_from_date >= '{$rpt_start}' AND l_to_date <= '{$rpt_end}' AND l_is_hourly = 'No'" . ($txt_search ? " AND u_name LIKE '%{$txt_search}%'" : "") . " GROUP BY l_u_id ORDER BY U.u_id ASC")->getResultArray();
+                // CI3 UNION logic: handles 4 overlap scenarios (x2 for half-day)
+                // 1: leave entirely within range, 2: range entirely within leave,
+                // 3: leave starts before range ends within, 4: leave starts within range ends after
+                $rs = $db->escapeString($rpt_start);
+                $re = $db->escapeString($rpt_end);
+                $searchWhere = $txt_search ? " AND u_name LIKE '%" . $db->escapeString($txt_search) . "%'" : "";
+
+                $sql_1 = "SELECT l_id, l_u_id, u_name, DATEDIFF(l_to_date, l_from_date) + 1 as total_days FROM aa_leaves L INNER JOIN aa_users U ON L.l_u_id = U.u_id WHERE ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='No' AND l_is_hourly = 'No'{$searchWhere}";
+                $sql_2 = "SELECT l_id, l_u_id, u_name, DATEDIFF('{$re}', '{$rs}') + 1 as total_days FROM aa_leaves L INNER JOIN aa_users U ON L.l_u_id = U.u_id WHERE (('{$rs}' BETWEEN l_from_date AND l_to_date) AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='No' AND l_is_hourly = 'No'{$searchWhere}";
+                $sql_3 = "SELECT l_id, l_u_id, u_name, DATEDIFF(l_to_date, '{$rs}') + 1 as total_days FROM aa_leaves L INNER JOIN aa_users U ON L.l_u_id = U.u_id WHERE (('{$rs}' BETWEEN l_from_date AND l_to_date) AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='No' AND l_is_hourly = 'No'{$searchWhere}";
+                $sql_4 = "SELECT l_id, l_u_id, u_name, DATEDIFF('{$re}', l_from_date) + 1 as total_days FROM aa_leaves L INNER JOIN aa_users U ON L.l_u_id = U.u_id WHERE ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='No' AND l_is_hourly = 'No'{$searchWhere}";
+
+                $sql_5 = "SELECT l_id, l_u_id, u_name, DATEDIFF(l_to_date, l_from_date) + 0.5 as total_days FROM aa_leaves L INNER JOIN aa_users U ON L.l_u_id = U.u_id WHERE ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='Yes' AND l_is_hourly = 'No'{$searchWhere}";
+                $sql_6 = "SELECT l_id, l_u_id, u_name, DATEDIFF('{$re}', '{$rs}') + 0.5 as total_days FROM aa_leaves L INNER JOIN aa_users U ON L.l_u_id = U.u_id WHERE (('{$rs}' BETWEEN l_from_date AND l_to_date) AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='Yes' AND l_is_hourly = 'No'{$searchWhere}";
+                $sql_7 = "SELECT l_id, l_u_id, u_name, DATEDIFF(l_to_date, '{$rs}') + 0.5 as total_days FROM aa_leaves L INNER JOIN aa_users U ON L.l_u_id = U.u_id WHERE (('{$rs}' BETWEEN l_from_date AND l_to_date) AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='Yes' AND l_is_hourly = 'No'{$searchWhere}";
+                $sql_8 = "SELECT l_id, l_u_id, u_name, DATEDIFF('{$re}', l_from_date) + 0.5 as total_days FROM aa_leaves L INNER JOIN aa_users U ON L.l_u_id = U.u_id WHERE ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='Yes' AND l_is_hourly = 'No'{$searchWhere}";
+
+                $sql = "SELECT l_u_id, u_name, SUM(total_days) as final_leave FROM (({$sql_1}) UNION ({$sql_2}) UNION ({$sql_3}) UNION ({$sql_4}) UNION ({$sql_5}) UNION ({$sql_6}) UNION ({$sql_7}) UNION ({$sql_8})) as FinalTb GROUP BY l_u_id, u_name ORDER BY u_name ASC";
+                $records = $db->query($sql)->getResultArray();
                 $data = [];
                 foreach ($records as $rec) {
-                    $approved = $db->query("SELECT COALESCE(SUM(CASE WHEN l_is_halfday = 'Yes' THEN 0.5 ELSE DATEDIFF(l_to_date, l_from_date) + 1 END), 0) as approved_leave FROM aa_leaves WHERE l_u_id = '{$rec['l_u_id']}' AND l_from_date >= '{$rpt_start}' AND l_to_date <= '{$rpt_end}' AND l_status = 'Approved' AND l_is_hourly = 'No'")->getRowArray();
-                    $declined = $db->query("SELECT COALESCE(SUM(CASE WHEN l_is_halfday = 'Yes' THEN 0.5 ELSE DATEDIFF(l_to_date, l_from_date) + 1 END), 0) as declined_leave FROM aa_leaves WHERE l_u_id = '{$rec['l_u_id']}' AND l_from_date >= '{$rpt_start}' AND l_to_date <= '{$rpt_end}' AND l_status = 'Declined' AND l_is_hourly = 'No'")->getRowArray();
+                    $l_u_id_val = intval($rec['l_u_id']);
+                    // Approved: same UNION logic filtered by status
+                    $asql_1 = "SELECT l_id, l_u_id, DATEDIFF(l_to_date, l_from_date) + 1 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Approved' AND ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='No' AND l_is_hourly = 'No'";
+                    $asql_2 = "SELECT l_id, l_u_id, DATEDIFF('{$re}', '{$rs}') + 1 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Approved' AND (('{$rs}' BETWEEN l_from_date AND l_to_date) AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='No' AND l_is_hourly = 'No'";
+                    $asql_3 = "SELECT l_id, l_u_id, DATEDIFF(l_to_date, '{$rs}') + 1 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Approved' AND (('{$rs}' BETWEEN l_from_date AND l_to_date) AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='No' AND l_is_hourly = 'No'";
+                    $asql_4 = "SELECT l_id, l_u_id, DATEDIFF('{$re}', l_from_date) + 1 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Approved' AND ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='No' AND l_is_hourly = 'No'";
+                    $asql_5 = "SELECT l_id, l_u_id, DATEDIFF(l_to_date, l_from_date) + 0.5 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Approved' AND ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='Yes' AND l_is_hourly = 'No'";
+                    $asql_6 = "SELECT l_id, l_u_id, DATEDIFF('{$re}', '{$rs}') + 0.5 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Approved' AND (('{$rs}' BETWEEN l_from_date AND l_to_date) AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='Yes' AND l_is_hourly = 'No'";
+                    $asql_7 = "SELECT l_id, l_u_id, DATEDIFF(l_to_date, '{$rs}') + 0.5 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Approved' AND (('{$rs}' BETWEEN l_from_date AND l_to_date) AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='Yes' AND l_is_hourly = 'No'";
+                    $asql_8 = "SELECT l_id, l_u_id, DATEDIFF('{$re}', l_from_date) + 0.5 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Approved' AND ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='Yes' AND l_is_hourly = 'No'";
+                    $approved = $db->query("SELECT COALESCE(SUM(total_days), 0) as approved_leave FROM (({$asql_1}) UNION ({$asql_2}) UNION ({$asql_3}) UNION ({$asql_4}) UNION ({$asql_5}) UNION ({$asql_6}) UNION ({$asql_7}) UNION ({$asql_8})) as FinalTb")->getRowArray();
+
+                    // Declined: same UNION logic filtered by status
+                    $dsql_1 = "SELECT l_id, l_u_id, DATEDIFF(l_to_date, l_from_date) + 1 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Declined' AND ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='No' AND l_is_hourly = 'No'";
+                    $dsql_2 = "SELECT l_id, l_u_id, DATEDIFF('{$re}', '{$rs}') + 1 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Declined' AND (('{$rs}' BETWEEN l_from_date AND l_to_date) AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='No' AND l_is_hourly = 'No'";
+                    $dsql_3 = "SELECT l_id, l_u_id, DATEDIFF(l_to_date, '{$rs}') + 1 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Declined' AND (('{$rs}' BETWEEN l_from_date AND l_to_date) AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='No' AND l_is_hourly = 'No'";
+                    $dsql_4 = "SELECT l_id, l_u_id, DATEDIFF('{$re}', l_from_date) + 1 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Declined' AND ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='No' AND l_is_hourly = 'No'";
+                    $dsql_5 = "SELECT l_id, l_u_id, DATEDIFF(l_to_date, l_from_date) + 0.5 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Declined' AND ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='Yes' AND l_is_hourly = 'No'";
+                    $dsql_6 = "SELECT l_id, l_u_id, DATEDIFF('{$re}', '{$rs}') + 0.5 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Declined' AND (('{$rs}' BETWEEN l_from_date AND l_to_date) AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='Yes' AND l_is_hourly = 'No'";
+                    $dsql_7 = "SELECT l_id, l_u_id, DATEDIFF(l_to_date, '{$rs}') + 0.5 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Declined' AND (('{$rs}' BETWEEN l_from_date AND l_to_date) AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='Yes' AND l_is_hourly = 'No'";
+                    $dsql_8 = "SELECT l_id, l_u_id, DATEDIFF('{$re}', l_from_date) + 0.5 as total_days FROM aa_leaves L WHERE L.l_u_id = {$l_u_id_val} AND l_status = 'Declined' AND ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='Yes' AND l_is_hourly = 'No'";
+                    $declined = $db->query("SELECT COALESCE(SUM(total_days), 0) as declined_leave FROM (({$dsql_1}) UNION ({$dsql_2}) UNION ({$dsql_3}) UNION ({$dsql_4}) UNION ({$dsql_5}) UNION ({$dsql_6}) UNION ({$dsql_7}) UNION ({$dsql_8})) as FinalTb")->getRowArray();
                     $row = [];
                     $row[] = $rec['u_name'];
                     $row[] = (fmod($rec['final_leave'], 1) !== 0.0) ? $rec['final_leave'] : (int)$rec['final_leave'];
@@ -4134,12 +4179,13 @@ class Api extends BaseController
                 $rpt_start = $request->getPost('rpt_start');
                 $rpt_end = $request->getPost('rpt_end');
                 $user = $db->table('aa_users')->select('u_name')->where('u_id', $l_u_id)->get()->getRowArray();
+                // Find leaves that overlap with the report range (not just fully contained)
                 $records = $db->table('aa_leaves L')
                     ->select('L.*')
                     ->where('L.l_u_id', $l_u_id)
                     ->where('L.l_is_hourly', 'No')
-                    ->where('L.l_from_date >=', $rpt_start)
-                    ->where('L.l_to_date <=', $rpt_end)
+                    ->where('L.l_from_date <=', $rpt_end)
+                    ->where('L.l_to_date >=', $rpt_start)
                     ->get()->getResultArray();
                 $data = [];
                 foreach ($records as $rec) {
