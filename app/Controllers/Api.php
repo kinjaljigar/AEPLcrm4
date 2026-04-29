@@ -4109,7 +4109,7 @@ class Api extends BaseController
                 $sql_7 = "SELECT l_id, l_u_id, u_name, DATEDIFF(l_to_date, '{$rs}') + 0.5 as total_days FROM aa_leaves L INNER JOIN aa_users U ON L.l_u_id = U.u_id WHERE (('{$rs}' BETWEEN l_from_date AND l_to_date) AND (l_to_date BETWEEN '{$rs}' AND '{$re}')) AND l_is_halfday='Yes' AND l_is_hourly = 'No'{$searchWhere}";
                 $sql_8 = "SELECT l_id, l_u_id, u_name, DATEDIFF('{$re}', l_from_date) + 0.5 as total_days FROM aa_leaves L INNER JOIN aa_users U ON L.l_u_id = U.u_id WHERE ((l_from_date BETWEEN '{$rs}' AND '{$re}') AND ('{$re}' BETWEEN l_from_date AND l_to_date)) AND l_is_halfday='Yes' AND l_is_hourly = 'No'{$searchWhere}";
 
-                $sql = "SELECT l_u_id, u_name, SUM(total_days) as final_leave FROM (({$sql_1}) UNION ({$sql_2}) UNION ({$sql_3}) UNION ({$sql_4}) UNION ({$sql_5}) UNION ({$sql_6}) UNION ({$sql_7}) UNION ({$sql_8})) as FinalTb GROUP BY l_u_id, u_name ORDER BY u_name ASC";
+                $sql = "SELECT l_u_id, u_name, SUM(total_days) as final_leave FROM (({$sql_1}) UNION ({$sql_2}) UNION ({$sql_3}) UNION ({$sql_4}) UNION ({$sql_5}) UNION ({$sql_6}) UNION ({$sql_7}) UNION ({$sql_8})) as FinalTb GROUP BY l_u_id, u_name ORDER BY l_u_id ASC";
                 $records = $db->query($sql)->getResultArray();
                 $data = [];
                 foreach ($records as $rec) {
