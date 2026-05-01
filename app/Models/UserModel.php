@@ -14,6 +14,7 @@ class UserModel extends Model
         'u_password',
         'u_email',
         'u_mobile',
+        'u_birthdate',
         'u_type',
         'u_status',
         'u_leader',

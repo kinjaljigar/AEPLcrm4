@@ -125,6 +125,18 @@
                     </div>
                 </div>
             </div>
+            <div class="col-lg-4 col-md-6 col-sm-12">
+                <div class="form-group">
+                    <label for="u_birthdate">Birth Date </label>
+                    <div class="input-group">
+                        <input type="text" class="form-control date-picker-noend" id="u_birthdate" name="u_birthdate" value=""
+                            placeholder="" readonly>
+                        <span class="input-group-btn">
+                            <button type="button" class="btn btn-default" onclick="$('#admin_add_form #u_birthdate').val('');" title="Clear date">&times;</button>
+                        </span>
+                    </div>
+                </div>
+            </div>
             <?php if ($view_data['admin_session']['u_type'] === 'Master Admin'): ?>
             <div class="col-lg-4 col-md-6 col-sm-12">
                 <div class="form-group">
@@ -305,6 +317,7 @@
                         setDatePicker("#admin_add_form .date-picker", {
                             endDate: Date()
                         });
+                        setDatePicker("#admin_add_form .date-picker-noend", {});
                         if (record.u_photo != "") {
                             $('#admin_add_form').find('#u_photo_disp').attr('src', record.u_photo).css(
                                 'display', 'block');
@@ -320,6 +333,7 @@
                 setDatePicker("#admin_add_form .date-picker", {
                     endDate: Date()
                 });
+                setDatePicker("#admin_add_form .date-picker-noend", {});
             });
         }
 

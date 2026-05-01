@@ -547,6 +547,7 @@ class Api extends BaseController
         $session = service('session');
         $admin_session = $session->get('admin_session');
         $u_id = $admin_session['u_id'] ?? 0;
+        $u_type = $admin_session['u_type'] ?? '';
 
         if (!$u_id) {
             echo json_encode([]);
@@ -556,6 +557,9 @@ class Api extends BaseController
         try {
             $db = \Config\Database::connect();
 
+            // Birthday notifications
+            $this->_checkBirthdayNotifications($db, $u_id, $u_type);
+
             // Fetch unsent notifications for this user
             $notifications = $db->table('aa_desktop_notification_queue')
                 ->where('u_id', $u_id)
@@ -564,27 +568,39 @@ class Api extends BaseController
                 ->get()->getResultArray();
 
             if (!empty($notifications)) {
-                // Delete fetched notifications
-                $ids = array_column($notifications, 'id');
-                $db->table('aa_desktop_notification_queue')
-                    ->whereIn('id', $ids)
-                    ->delete();
+                $birthdayIds = [];
+                $regularIds  = [];
+                foreach ($notifications as $n) {
+                    if (strpos($n['title'], 'Birthday') !== false) {
+                        $birthdayIds[] = $n['id'];
+                    } else {
+                        $regularIds[] = $n['id'];
+                    }
+                }
+                // Regular notifications: delete after delivering
+                if (!empty($regularIds)) {
+                    $db->table('aa_desktop_notification_queue')->whereIn('id', $regularIds)->delete();
+                }
+                // Birthday notifications: mark is_sent=1 so dedup check can find them; garbage-collected later
+                if (!empty($birthdayIds)) {
+                    $db->table('aa_desktop_notification_queue')->whereIn('id', $birthdayIds)->update(['is_sent' => 1]);
+                }
             }
 
-            // Garbage collection: keep only last 10 sent notifications per user
-            $sentNotifications = $db->table('aa_desktop_notification_queue')
-                ->where('u_id', $u_id)
-                ->where('is_sent', 1)
-                ->orderBy('id', 'DESC')
-                ->get()->getResultArray();
-            $latest10Ids = array_column(array_slice($sentNotifications, 0, 10), 'id');
-            if (!empty($latest10Ids)) {
-                $db->table('aa_desktop_notification_queue')
-                    ->where('u_id', $u_id)
-                    ->where('is_sent', 1)
-                    ->whereNotIn('id', $latest10Ids)
-                    ->delete();
-            }
+            // Garbage collection: keep only last 200 notification records per user
+            $uid_int = intval($u_id);
+            $db->query(
+                "DELETE FROM aa_desktop_notification_queue
+                 WHERE u_id = {$uid_int}
+                 AND id NOT IN (
+                     SELECT id FROM (
+                         SELECT id FROM aa_desktop_notification_queue
+                         WHERE u_id = {$uid_int}
+                         ORDER BY id DESC
+                         LIMIT 200
+                     ) AS keep_rows
+                 )"
+            );
 
             echo json_encode($notifications);
         } catch (\Exception $e) {
@@ -593,6 +609,131 @@ class Api extends BaseController
         }
         exit;
     }
+
+    /**
+     * Birthday notifications for all active employees.
+     * - All active users see who has a birthday today (or belated Sat/Sun if Monday).
+     * - The birthday person gets a personal "Happy Birthday!" notification.
+     * - Birthday notification records older than 3 months are auto-deleted.
+     */
+    private function _checkBirthdayNotifications($db, $u_id, $u_type = '')
+    {
+        try {
+            $today  = date('Y-m-d');
+            $uid    = intval($u_id);
+            $isMon  = (date('N') == 1);
+            $months = ['01'=>'Jan','02'=>'Feb','03'=>'Mar','04'=>'Apr','05'=>'May','06'=>'Jun',
+                       '07'=>'Jul','08'=>'Aug','09'=>'Sep','10'=>'Oct','11'=>'Nov','12'=>'Dec'];
+
+            // Cleanup birthday records older than 3 months
+            $db->query(
+                "DELETE FROM aa_desktop_notification_queue
+                 WHERE (title LIKE 'Birthday Today%' OR title LIKE 'Happy Birthday!%' OR title LIKE 'Belated Birthday%')
+                 AND created_at < DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+            );
+
+            // Build date map: 'm-d' => type label
+            $dateMap = [date('m-d') => 'today'];
+            if ($isMon) {
+                $satTs = strtotime('-2 days');
+                $sunTs = strtotime('-1 day');
+                $dateMap[date('m-d', $satTs)] = 'Sat ' . date('d', $satTs) . ' ' . ($months[date('m', $satTs)] ?? '');
+                $dateMap[date('m-d', $sunTs)] = 'Sun ' . date('d', $sunTs) . ' ' . ($months[date('m', $sunTs)] ?? '');
+            }
+
+            $inList    = "'" . implode("','", array_map([$db, 'escapeString'], array_keys($dateMap))) . "'";
+            $dateWhere = "DATE_FORMAT(u_birthdate, '%m-%d') IN ({$inList})";
+
+            // --- ALL active users: birthday summary notification ---
+            $alreadyAll = $db->query(
+                "SELECT COUNT(*) as cnt FROM aa_desktop_notification_queue
+                 WHERE u_id = {$uid}
+                 AND (title LIKE '%Birthday Today%' OR title LIKE '%Belated Birthday%')
+                 AND DATE(created_at) = '{$today}'"
+            )->getRowArray()['cnt'] ?? 0;
+
+            if (!$alreadyAll) {
+                $birthdayUsers = $db->query(
+                    "SELECT u_name, DATE_FORMAT(u_birthdate, '%m-%d') as bmd
+                     FROM aa_users
+                     WHERE u_status = 'Active' AND u_birthdate IS NOT NULL
+                     AND u_birthdate != '0000-00-00' AND {$dateWhere}"
+                )->getResultArray();
+
+                if (!empty($birthdayUsers)) {
+                    $todayLines   = [];
+                    $belatedLines = [];
+                    foreach ($birthdayUsers as $bu) {
+                        [$mm, $dd] = explode('-', $bu['bmd']);
+                        $dateStr   = $dd . ' ' . ($months[$mm] ?? $mm);
+                        $label     = $dateMap[$bu['bmd']] ?? 'today';
+                        if ($label === 'today') {
+                            $todayLines[] = $bu['u_name'] . ' (' . $dateStr . ')';
+                        } else {
+                            $belatedLines[] = $bu['u_name'] . ' (' . $dateStr . ' - ' . $label . ')';
+                        }
+                    }
+
+                    $isBelatedOnly = empty($todayLines);
+                    $allEntries    = array_merge($todayLines, $belatedLines);
+                    $count         = count($allEntries);
+
+                    if ($isBelatedOnly) {
+                        $title   = 'Belated Birthday' . ($count > 1 ? " ({$count})" : '');
+                        $message = 'Belated Happy Birthday: ' . implode(', ', $allEntries);
+                    } else {
+                        $title   = 'Birthday Today' . ($count > 1 ? " ({$count})" : '');
+                        $parts   = [];
+                        if (!empty($todayLines))   $parts[] = implode(', ', $todayLines);
+                        if (!empty($belatedLines)) $parts[] = 'Belated: ' . implode(', ', $belatedLines);
+                        $message = 'Happy Birthday: ' . implode(' | ', $parts);
+                    }
+
+                    $db->table('aa_desktop_notification_queue')->insert([
+                        'u_id'       => $uid,
+                        'title'      => $title,
+                        'message'    => $message,
+                        'payload'    => json_encode(['screen_name' => 'Birthday']),
+                        'is_sent'    => 0,
+                        'created_at' => date('Y-m-d H:i:s'),
+                    ]);
+                }
+            }
+
+            // --- Birthday person: personal notification ---
+            $alreadySelf = $db->query(
+                "SELECT COUNT(*) as cnt FROM aa_desktop_notification_queue
+                 WHERE u_id = {$uid} AND title LIKE 'Happy Birthday!%'
+                 AND DATE(created_at) = '{$today}'"
+            )->getRowArray()['cnt'] ?? 0;
+
+            if (!$alreadySelf) {
+                $selfRow = $db->query(
+                    "SELECT u_name, DATE_FORMAT(u_birthdate, '%m-%d') as bmd FROM aa_users
+                     WHERE u_id = {$uid} AND u_status = 'Active'
+                     AND u_birthdate IS NOT NULL AND u_birthdate != '0000-00-00'
+                     AND {$dateWhere} LIMIT 1"
+                )->getRowArray();
+
+                if (!empty($selfRow)) {
+                    [$mm, $dd]   = explode('-', $selfRow['bmd']);
+                    $dateStr     = $dd . ' ' . ($months[$mm] ?? $mm);
+                    $isBelated   = ($dateMap[$selfRow['bmd']] !== 'today');
+                    $db->table('aa_desktop_notification_queue')->insert([
+                        'u_id'       => $uid,
+                        'title'      => 'Happy Birthday!',
+                        'message'    => ($isBelated ? 'Belated ' : '') . 'Happy Birthday, ' . $selfRow['u_name'] . '! (' . $dateStr . ')',
+                        'payload'    => json_encode(['screen_name' => 'Birthday', 'action' => 'self_birthday']),
+                        'is_sent'    => 0,
+                        'created_at' => date('Y-m-d H:i:s'),
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            log_message('error', 'Birthday notification check failed: ' . $e->getMessage());
+        }
+    }
+
     public function getProjectUsers($projectId)
     {
         while (ob_get_level() > 0) {
@@ -1539,6 +1680,9 @@ class Api extends BaseController
                 'u_comments' => $request->getPost('u_comments') ?? '',
             ];
 
+            // u_birthdate handled via raw query to avoid query builder caching issues with new column
+            $birthdateRaw = !empty($request->getPost('u_birthdate')) ? convert_display2db($request->getPost('u_birthdate')) : null;
+
             $password = $request->getPost('u_password');
             if (!empty($password)) {
                 $userData['u_password'] = md5($password);
@@ -1547,6 +1691,12 @@ class Api extends BaseController
             if ($u_id > 0) {
                 $userData['updated_at'] = date('Y-m-d H:i:s');
                 $db->table('aa_users')->where('u_id', $u_id)->update($userData);
+                // Update birthdate separately via raw query
+                if ($birthdateRaw !== null) {
+                    $db->query("UPDATE aa_users SET u_birthdate = ? WHERE u_id = ?", [$birthdateRaw, $u_id]);
+                } else {
+                    $db->query("UPDATE aa_users SET u_birthdate = NULL WHERE u_id = " . intval($u_id));
+                }
             } else {
                 if (empty($password)) {
                     echo json_encode(['status' => 'fail', 'message' => 'Password is required for new employee.', 'type' => 'popup']);
@@ -1565,6 +1715,10 @@ class Api extends BaseController
                 $u_id = (int)($maxRow['max_id'] ?? 0) + 1;
                 $userData['u_id'] = $u_id;
                 $db->table('aa_users')->insert($userData);
+                // Set birthdate after insert via raw query
+                if ($birthdateRaw !== null) {
+                    $db->query("UPDATE aa_users SET u_birthdate = ? WHERE u_id = ?", [$birthdateRaw, $u_id]);
+                }
             }
 
             // Handle photo upload (save to root assets/logos/ to match URL)
@@ -1643,6 +1797,11 @@ class Api extends BaseController
                     $user['u_leave_date'] = date('d-m-Y', strtotime($user['u_leave_date']));
                 } else {
                     $user['u_leave_date'] = '';
+                }
+                if (!empty($user['u_birthdate']) && $user['u_birthdate'] !== '0000-00-00') {
+                    $user['u_birthdate'] = date('d-m-Y', strtotime($user['u_birthdate']));
+                } else {
+                    $user['u_birthdate'] = '';
                 }
                 echo json_encode([
                     'status' => 'pass',
