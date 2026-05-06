@@ -408,12 +408,16 @@ if (isset($view_data['plugins'])) {
                 if (!empty($session->get('messages'))) {
                     echo "<div style='margin:10px 20px;'>";
                     foreach ($session->get('messages') as $message) {
-                        if ($message['conference_message'] == 'Yes' || $message['task_message'] == 'Yes')
+                        if (!empty($message['birthday_message']) && $message['birthday_message'] == 'Yes')
+                            echo '<div class="alert alert-dismissible" style="background-color:#fffacd;border-color:#ffd700;color:#333;">';
+                        elseif ($message['conference_message'] == 'Yes' || $message['task_message'] == 'Yes')
                             echo '<div class="alert alert-dismissible" style="background-color:#ebc634;">';
                         else
                             echo '<div class="alert alert-success alert-dismissible">';
                         echo '<button type="button" class="close reset_me" data-dismiss="alert" aria-hidden="true" data-id="' . $message['me_id'] . '">×</button>';
-                        if ($message['leave_message'] == 'No')
+                        if (!empty($message['birthday_message']) && $message['birthday_message'] == 'Yes')
+                            echo '<h4><i class="icon fa fa-birthday-cake"></i> Birthdays </h4>';
+                        elseif ($message['leave_message'] == 'No')
                             echo '<h4><i class="icon fa fa-envelope"></i> ' . $message['p_name'] . '</h4>';
                         else
                             echo '<h4><i class="icon fa fa-envelope"></i> Leave Approval Message </h4>';

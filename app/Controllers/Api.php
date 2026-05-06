@@ -611,28 +611,52 @@ class Api extends BaseController
     }
 
     /**
-     * Birthday notifications for all active employees.
-     * - All active users see who has a birthday today (or belated Sat/Sun if Monday).
-     * - The birthday person gets a personal "Happy Birthday!" notification.
-     * - Birthday notification records older than 3 months are auto-deleted.
+     * Birthday message for all active employees (except Master Admin).
+     * - Creates one message in aa_message for the day with all birthdays
+     * - Adds entries in aa_message_users for all non-Master-Admin users to see it
+     * - On weekend: skipped (will be sent Monday as belated)
+     * - Older messages auto-deleted after 3 months
      */
     private function _checkBirthdayNotifications($db, $u_id, $u_type = '')
     {
         try {
             $today  = date('Y-m-d');
-            $uid    = intval($u_id);
-            $isMon  = (date('N') == 1);
+            $dayNum = (int)date('N'); // 1=Mon ... 6=Sat, 7=Sun
+            $isMon  = ($dayNum === 1);
+            $isWeekend = ($dayNum === 6 || $dayNum === 7);
             $months = ['01'=>'Jan','02'=>'Feb','03'=>'Mar','04'=>'Apr','05'=>'May','06'=>'Jun',
                        '07'=>'Jul','08'=>'Aug','09'=>'Sep','10'=>'Oct','11'=>'Nov','12'=>'Dec'];
 
-            // Cleanup birthday records older than 3 months
+            // Skip on Sat/Sun — will send Monday as belated
+            if ($isWeekend) return;
+
+            // Cleanup birthday messages:
+            // Step 1: Delete all aa_message_users rows where mu_read=1 for birthday messages
             $db->query(
-                "DELETE FROM aa_desktop_notification_queue
-                 WHERE (title LIKE 'Birthday Today%' OR title LIKE 'Happy Birthday!%' OR title LIKE 'Belated Birthday%')
-                 AND created_at < DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                "DELETE MU FROM aa_message_users MU
+                 INNER JOIN aa_message M ON M.me_id = MU.mu_me_id
+                 WHERE M.birthday_message = 'Yes' AND MU.mu_read = 1"
+            );
+            // Step 2: Delete birthday messages where all users have dismissed (no unread rows remain)
+            $db->query(
+                "DELETE FROM aa_message
+                 WHERE birthday_message = 'Yes'
+                 AND me_id NOT IN (SELECT mu_me_id FROM aa_message_users WHERE mu_read = 0 OR mu_read IS NULL)"
+            );
+            // Step 3: Force-delete old birthday messages (> 1 month) — delete users first, then messages
+            $db->query(
+                "DELETE MU FROM aa_message_users MU
+                 INNER JOIN aa_message M ON M.me_id = MU.mu_me_id
+                 WHERE M.birthday_message = 'Yes'
+                 AND DATE(M.me_datetime) < DATE_SUB(NOW(), INTERVAL 4 MONTH)"
+            );
+            $db->query(
+                "DELETE FROM aa_message
+                 WHERE birthday_message = 'Yes'
+                 AND DATE(me_datetime) < DATE_SUB(NOW(), INTERVAL 4 MONTH)"
             );
 
-            // Build date map: 'm-d' => type label
+            // Build date map: 'm-d' => label
             $dateMap = [date('m-d') => 'today'];
             if ($isMon) {
                 $satTs = strtotime('-2 days');
@@ -644,93 +668,75 @@ class Api extends BaseController
             $inList    = "'" . implode("','", array_map([$db, 'escapeString'], array_keys($dateMap))) . "'";
             $dateWhere = "DATE_FORMAT(u_birthdate, '%m-%d') IN ({$inList})";
 
-            // --- ALL active users: birthday summary notification ---
-            $alreadyAll = $db->query(
-                "SELECT COUNT(*) as cnt FROM aa_desktop_notification_queue
-                 WHERE u_id = {$uid}
-                 AND (title LIKE '%Birthday Today%' OR title LIKE '%Belated Birthday%')
-                 AND DATE(created_at) = '{$today}'"
+            // Check if message already created for today
+            $alreadySent = $db->query(
+                "SELECT COUNT(*) as cnt FROM aa_message
+                 WHERE birthday_message = 'Yes'
+                 AND DATE(me_datetime) = '{$today}'"
             )->getRowArray()['cnt'] ?? 0;
 
-            if (!$alreadyAll) {
-                $birthdayUsers = $db->query(
-                    "SELECT u_name, DATE_FORMAT(u_birthdate, '%m-%d') as bmd
-                     FROM aa_users
-                     WHERE u_status = 'Active' AND u_birthdate IS NOT NULL
-                     AND u_birthdate != '0000-00-00' AND {$dateWhere}"
-                )->getResultArray();
+            if ($alreadySent > 0) return; // Already sent today
 
-                if (!empty($birthdayUsers)) {
-                    $todayLines   = [];
-                    $belatedLines = [];
-                    foreach ($birthdayUsers as $bu) {
-                        [$mm, $dd] = explode('-', $bu['bmd']);
-                        $dateStr   = $dd . ' ' . ($months[$mm] ?? $mm);
-                        $label     = $dateMap[$bu['bmd']] ?? 'today';
-                        if ($label === 'today') {
-                            $todayLines[] = $bu['u_name'] . ' (' . $dateStr . ')';
-                        } else {
-                            $belatedLines[] = $bu['u_name'] . ' (' . $dateStr . ' - ' . $label . ')';
-                        }
-                    }
+            // Find all active users with birthdays
+            $birthdayUsers = $db->query(
+                "SELECT u_id, u_name, DATE_FORMAT(u_birthdate, '%m-%d') as bmd
+                 FROM aa_users
+                 WHERE u_status = 'Active' AND u_birthdate IS NOT NULL
+                 AND u_birthdate != '0000-00-00' AND {$dateWhere}"
+            )->getResultArray();
 
-                    $isBelatedOnly = empty($todayLines);
-                    $allEntries    = array_merge($todayLines, $belatedLines);
-                    $count         = count($allEntries);
+            if (empty($birthdayUsers)) return;
 
-                    if ($isBelatedOnly) {
-                        $title   = 'Belated Birthday' . ($count > 1 ? " ({$count})" : '');
-                        $message = 'Belated Happy Birthday: ' . implode(', ', $allEntries);
-                    } else {
-                        $title   = 'Birthday Today' . ($count > 1 ? " ({$count})" : '');
-                        $parts   = [];
-                        if (!empty($todayLines))   $parts[] = implode(', ', $todayLines);
-                        if (!empty($belatedLines)) $parts[] = 'Belated: ' . implode(', ', $belatedLines);
-                        $message = 'Happy Birthday: ' . implode(' | ', $parts);
-                    }
-
-                    $db->table('aa_desktop_notification_queue')->insert([
-                        'u_id'       => $uid,
-                        'title'      => $title,
-                        'message'    => $message,
-                        'payload'    => json_encode(['screen_name' => 'Birthday']),
-                        'is_sent'    => 0,
-                        'created_at' => date('Y-m-d H:i:s'),
-                    ]);
+            // Build message
+            $todayLines = [];
+            $belatedLines = [];
+            foreach ($birthdayUsers as $bu) {
+                [$mm, $dd] = explode('-', $bu['bmd']);
+                $dateStr = $dd . ' ' . ($months[$mm] ?? $mm);
+                $label = $dateMap[$bu['bmd']] ?? 'today';
+                if ($label === 'today') {
+                    $todayLines[] = $bu['u_name'] . ' (' . $dateStr . ')';
+                } else {
+                    $belatedLines[] = $bu['u_name'] . ' (' . $dateStr . ' - belated)';
                 }
             }
 
-            // --- Birthday person: personal notification ---
-            $alreadySelf = $db->query(
-                "SELECT COUNT(*) as cnt FROM aa_desktop_notification_queue
-                 WHERE u_id = {$uid} AND title LIKE 'Happy Birthday!%'
-                 AND DATE(created_at) = '{$today}'"
-            )->getRowArray()['cnt'] ?? 0;
+            $allEntries = array_merge($todayLines, $belatedLines);
+            $isBelatedOnly = empty($todayLines);
+            $messageText = ($isBelatedOnly ? 'Belated ' : '') . 'Happy Birthday: ' . implode(', ', $allEntries);
 
-            if (!$alreadySelf) {
-                $selfRow = $db->query(
-                    "SELECT u_name, DATE_FORMAT(u_birthdate, '%m-%d') as bmd FROM aa_users
-                     WHERE u_id = {$uid} AND u_status = 'Active'
-                     AND u_birthdate IS NOT NULL AND u_birthdate != '0000-00-00'
-                     AND {$dateWhere} LIMIT 1"
-                )->getRowArray();
+            // Insert message
+            $nextMeId = (int)($db->query("SELECT COALESCE(MAX(me_id), 0) + 1 AS next_id FROM aa_message")->getRowArray()['next_id'] ?? 1);
+            $db->table('aa_message')->insert([
+                'me_id'              => $nextMeId,
+                'me_datetime'        => date('Y-m-d H:i:s'),
+                'me_text'            => $messageText,
+                'me_p_id'            => 0,
+                'leave_message'      => 'No',
+                'conference_message' => 'No',
+                'task_message'       => 'No',
+                'schedule_message'   => 'No',
+                'birthday_message'   => 'Yes',
+            ]);
 
-                if (!empty($selfRow)) {
-                    [$mm, $dd]   = explode('-', $selfRow['bmd']);
-                    $dateStr     = $dd . ' ' . ($months[$mm] ?? $mm);
-                    $isBelated   = ($dateMap[$selfRow['bmd']] !== 'today');
-                    $db->table('aa_desktop_notification_queue')->insert([
-                        'u_id'       => $uid,
-                        'title'      => 'Happy Birthday!',
-                        'message'    => ($isBelated ? 'Belated ' : '') . 'Happy Birthday, ' . $selfRow['u_name'] . '! (' . $dateStr . ')',
-                        'payload'    => json_encode(['screen_name' => 'Birthday', 'action' => 'self_birthday']),
-                        'is_sent'    => 0,
-                        'created_at' => date('Y-m-d H:i:s'),
-                    ]);
-                }
+            // Add to all non-Master-Admin users (include Super Admin, Bim Head, etc)
+            $allUsers = $db->query(
+                "SELECT u_id FROM aa_users WHERE u_status = 'Active' AND u_type NOT IN ('Master Admin')"
+            )->getResultArray();
+
+            $nextMuId = (int)($db->query("SELECT COALESCE(MAX(mu_id), 0) + 1 AS next_id FROM aa_message_users")->getRowArray()['next_id'] ?? 1);
+            foreach ($allUsers as $user) {
+                $db->table('aa_message_users')->insert([
+                    'mu_id'    => $nextMuId++,
+                    'mu_me_id' => $nextMeId,
+                    'mu_u_id'  => $user['u_id'],
+                    'mu_p_id'  => 0,
+                    'mu_read'  => 0,
+                ]);
             }
+
         } catch (\Exception $e) {
-            log_message('error', 'Birthday notification check failed: ' . $e->getMessage());
+            log_message('error', 'Birthday message check failed: ' . $e->getMessage());
         }
     }
 

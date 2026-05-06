@@ -157,6 +157,7 @@ abstract class BaseController extends Controller
                                COALESCE(M.leave_message, 'No') AS leave_message,
                                COALESCE(M.conference_message, 'No') AS conference_message,
                                COALESCE(M.task_message, 'No') AS task_message,
+                               COALESCE(M.birthday_message, 'No') AS birthday_message,
                                P.p_name
                         FROM aa_message M
                         LEFT JOIN aa_projects P ON P.p_id = M.me_p_id

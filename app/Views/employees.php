@@ -84,7 +84,7 @@
                     <label for="u_password">Password<span class="explain-tip edit_only">Keep blank if do not want to
                             change.</span></label>
                     <input type="password" class="form-control" id="u_password" name="u_password" value=""
-                        placeholder="">
+                        placeholder="" autocomplete="new-password">
                 </div>
             </div>
             <div class="col-lg-4 col-md-6 col-sm-12">
@@ -322,6 +322,7 @@
                             $('#admin_add_form').find('#u_photo_disp').attr('src', record.u_photo).css(
                                 'display', 'block');
                         }
+                        $('#admin_add_form #u_password').val(''); // always clear password on edit
                         $('#admin_add_form .edit_only').show();
                     });
                 } else {
