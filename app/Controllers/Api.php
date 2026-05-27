@@ -1577,6 +1577,54 @@ class Api extends BaseController
         $builder->orderBy('P.p_number', 'ASC');
         $projects = $builder->get()->getResultArray();
 
+        $isMasterOrSuper = in_array($admin_session['u_type'], ['Master Admin', 'Super Admin']);
+
+        // Bulk pre-fetch salary, expenses, and leader names to avoid N+1 queries
+        $salary_by_project = [];
+        $expense_by_project = [];
+        $all_leaders_map = [];
+
+        if (!empty($projects)) {
+            $p_ids = array_column($projects, 'p_id');
+            $p_ids_str = implode(',', array_map('intval', $p_ids));
+
+            if ($isMasterOrSuper) {
+                // Bulk salary query
+                try {
+                    $salaryRows = $db->query("SELECT at_p_id, SUM((at_end - at_start) / 60 * u_salary) as final_salary FROM aa_attendance A INNER JOIN aa_users_salary U ON A.at_u_id = U.u_id AND A.at_date >= U.u_start_date AND A.at_date < U.u_end_date WHERE at_p_id IN ($p_ids_str) GROUP BY at_p_id")->getResultArray();
+                    foreach ($salaryRows as $s) {
+                        $salary_by_project[$s['at_p_id']] = floatval($s['final_salary']);
+                    }
+                } catch (\Exception $e) {}
+
+                // Bulk expense query
+                $expRows = $db->query("SELECT pe_p_id, SUM(pe_val) as total_expense FROM aa_project_expense WHERE pe_p_id IN ($p_ids_str) GROUP BY pe_p_id")->getResultArray();
+                foreach ($expRows as $e) {
+                    $expense_by_project[$e['pe_p_id']] = floatval($e['total_expense']);
+                }
+            }
+
+            // Bulk leader names - collect all unique leader IDs
+            $all_leader_ids = [];
+            foreach ($projects as $proj) {
+                if (!empty($proj['p_leader'])) {
+                    foreach (explode(',', $proj['p_leader']) as $lid) {
+                        $lid = intval(trim($lid));
+                        if ($lid > 0) $all_leader_ids[$lid] = true;
+                    }
+                }
+            }
+            if (!empty($all_leader_ids)) {
+                $leader_rows = $db->table('aa_users')
+                    ->select('u_id, u_name')
+                    ->whereIn('u_id', array_keys($all_leader_ids))
+                    ->get()->getResultArray();
+                foreach ($leader_rows as $lr) {
+                    $all_leaders_map[$lr['u_id']] = $lr['u_name'];
+                }
+            }
+        }
+
         // Format data for DataTables
         $data = [];
         foreach ($projects as $project) {
@@ -1586,17 +1634,10 @@ class Api extends BaseController
             $row[] = $project['p_address'] ?? '';
 
             // Add cost/expense/profit columns for Master Admin and Super Admin
-            if (in_array($admin_session['u_type'], ['Master Admin', 'Super Admin'])) {
+            if ($isMasterOrSuper) {
                 $p_value = floatval($project['p_value'] ?? 0);
-                // Salary from attendance (hours * salary rate)
-                try {
-                    $salaryRow = $db->query("SELECT SUM(total_salary) as final_salary FROM (SELECT ((at_end - at_start) / 60 * u_salary) as total_salary FROM aa_attendance A INNER JOIN aa_users_salary U ON A.at_u_id = U.u_id WHERE at_p_id = ? AND at_date >= u_start_date AND at_date < u_end_date) as FinnalDB", [$project['p_id']])->getRowArray();
-                    $total_salary = floatval($salaryRow['final_salary'] ?? 0);
-                } catch (\Exception $e) {
-                    $total_salary = 0;
-                }
-                $expRow = $db->query("SELECT SUM(pe_val) as total_expense FROM aa_project_expense WHERE pe_p_id = ?", [$project['p_id']])->getRowArray();
-                $total_expense = $total_salary + floatval($expRow['total_expense'] ?? 0);
+                $total_salary = $salary_by_project[$project['p_id']] ?? 0;
+                $total_expense = $total_salary + ($expense_by_project[$project['p_id']] ?? 0);
                 $profit = $p_value - $total_expense;
 
                 $row[] = number_format($p_value, 2);
@@ -1606,17 +1647,14 @@ class Api extends BaseController
 
             $row[] = $project['p_status'];
 
-            // Get leader names
+            // Get leader names from pre-fetched map
             $leader_names = [];
             if (!empty($project['p_leader'])) {
-                $leader_ids = explode(',', $project['p_leader']);
-                $leaders = $db->table('aa_users')
-                    ->select('u_name')
-                    ->whereIn('u_id', $leader_ids)
-                    ->get()
-                    ->getResultArray();
-                foreach ($leaders as $leader) {
-                    $leader_names[] = $leader['u_name'];
+                foreach (explode(',', $project['p_leader']) as $lid) {
+                    $lid = intval(trim($lid));
+                    if (isset($all_leaders_map[$lid])) {
+                        $leader_names[] = $all_leaders_map[$lid];
+                    }
                 }
             }
             $row[] = implode(', ', $leader_names);
@@ -4640,25 +4678,50 @@ class Api extends BaseController
             case 'projects':
                 $t_p_id = $request->getPost('t_p_id') ?? 0;
                 $t_parent = $request->getPost('t_parent') ?? 0;
-                $offset = $request->getPost('start') ?? 0;
-                $limit = $request->getPost('length') ?? 25;
                 $txt_p_status = $request->getPost('txt_p_status');
-                $txt_projects = $request->getPost('txt_projects');
                 $txt_p_cat = $request->getPost('txt_p_cat');
 
                 $builder = $db->table('aa_tasks T');
                 $builder->select('P.p_name, P.p_id, P.p_number, P.p_value, P.p_cat, P.p_status');
                 $builder->join('aa_projects P', 'P.p_id = T.t_p_id', 'left');
-                $builder->join('aa_users U', 'U.u_id = T.t_u_id', 'left');
                 $builder->distinct();
                 if ($txt_p_cat) $builder->where('P.p_cat', $txt_p_cat);
-                if ($txt_p_status) $builder->like('P.p_status', $txt_p_status);
-                if ($txt_projects) $builder->groupStart()->like('P.p_number', $txt_projects)->orLike('P.p_name', $txt_projects)->groupEnd();
+                if ($txt_p_status) $builder->where('P.p_status', $txt_p_status);
                 if ($t_parent > 0) $builder->where('T.t_parent', $t_parent); else $builder->where('T.t_parent', 0);
                 if ($t_p_id > 0) $builder->where('T.t_p_id', $t_p_id);
                 $builder->orderBy('P.p_name', 'ASC');
                 $records = $builder->get()->getResultArray();
                 $totalData = count($records);
+
+                // Bulk-fetch tasks, assigns, and hours to avoid N+1 queries
+                $p_ids = array_column($records, 'p_id');
+                $tasks_by_project = [];
+                $assigns_all = [];
+                $hours_all = [];
+                if (!empty($p_ids)) {
+                    $tasks_all = $db->table('aa_tasks T')
+                        ->select('T.t_id, T.t_p_id, T.t_title, T.t_priority, T.t_createdate, U.u_name')
+                        ->join('aa_users U', 'U.u_id = T.t_u_id', 'left')
+                        ->whereIn('T.t_p_id', $p_ids)
+                        ->where('T.t_parent', 0)
+                        ->orderBy('T.t_p_id', 'ASC')
+                        ->orderBy('T.t_title', 'ASC')
+                        ->get()->getResultArray();
+                    $t_ids = array_column($tasks_all, 't_id');
+                    foreach ($tasks_all as $task) {
+                        $tasks_by_project[$task['t_p_id']][] = $task;
+                    }
+                    if (!empty($t_ids)) {
+                        $assigns_raw = $db->query("SELECT TU.tu_t_id, TU.tu_u_id, U.u_name FROM aa_task2user TU LEFT JOIN aa_users U ON TU.tu_u_id = U.u_id WHERE TU.tu_t_id IN (" . implode(',', $t_ids) . ")")->getResultArray();
+                        foreach ($assigns_raw as $a) {
+                            $assigns_all[$a['tu_t_id']][] = $a;
+                        }
+                        $hours_raw = $db->query("SELECT at_t_id, at_u_id, SUM((at_end - at_start) / 60) as TOTALwhours FROM aa_attendance WHERE at_t_id IN (" . implode(',', $t_ids) . ") GROUP BY at_t_id, at_u_id")->getResultArray();
+                        foreach ($hours_raw as $h) {
+                            $hours_all[$h['at_t_id']][$h['at_u_id']] = $h['TOTALwhours'];
+                        }
+                    }
+                }
 
                 $result = [];
                 $i = 1;
@@ -4672,21 +4735,14 @@ class Api extends BaseController
                         $nestedData[] = $rec['p_cat'];
                         $nestedData[] = $rec['p_status'];
                     }
-                    $tasks_list = $db->table('aa_tasks T')
-                        ->select('T.*, U.u_name, P.p_name')
-                        ->join('aa_projects P', 'P.p_id = T.t_p_id', 'left')
-                        ->join('aa_users U', 'U.u_id = T.t_u_id', 'left')
-                        ->where('T.t_p_id', $rec['p_id'])
-                        ->orderBy('T.t_title', 'ASC')
-                        ->get()->getResultArray();
+                    $tasks_list = $tasks_by_project[$rec['p_id']] ?? [];
                     if (!empty($tasks_list)) {
                         $task_text = '';
                         foreach ($tasks_list as $task) {
-                            $assigns = $db->query("SELECT TU.*, U.u_name, U.u_id FROM aa_task2user TU LEFT JOIN aa_users U ON TU.tu_u_id = U.u_id WHERE TU.tu_t_id = '{$task['t_id']}'")->getResultArray();
+                            $assigns = $assigns_all[$task['t_id']] ?? [];
                             $stings = '';
                             foreach ($assigns as $assign) {
-                                $assign_hrs = $db->query("SELECT SUM(((atte.at_end - atte.at_start) / 60)) as TOTALwhours FROM aa_attendance as atte, aa_users U WHERE atte.at_t_id = '{$assign['tu_t_id']}' AND atte.at_u_id = U.u_id AND U.u_id = '{$assign['tu_u_id']}'")->getRowArray();
-                                $n = $assign_hrs['TOTALwhours'] ?? 0;
+                                $n = $hours_all[$task['t_id']][$assign['tu_u_id']] ?? 0;
                                 $stings .= $assign['u_name'] . ' - <b>' . number_format($this->convertHours($n), 2) . ' hr</b>  , ';
                             }
                             $task_text .= "\r\r<b>Task Title: " . $task['t_title'] . "</b>\r<b>Priority: </b>" . $task['t_priority'] . "\r<b>Posted Date: </b>" . convert_db2display($task['t_createdate']) . "\r<b>Posted By: </b>" . $task['u_name'] . "\r<b>Assigns: </b>" . $stings;
@@ -4842,6 +4898,56 @@ class Api extends BaseController
                 } else {
                     echo json_encode(['draw' => intval($draw), 'recordsTotal' => 0, 'recordsFiltered' => 0, 'data' => []]);
                 }
+                break;
+
+            case 'employee_work':
+                $emp_u_id = $request->getPost('emp_u_id') ?? '';
+                $proj_id = $request->getPost('p_id') ?? '';
+                $ew_start = convert_display2db($request->getPost('rpt_start') ?? '');
+                $ew_end = convert_display2db($request->getPost('rpt_end') ?? '');
+
+                if (!$emp_u_id && !$proj_id) {
+                    echo json_encode(['draw' => intval($draw), 'recordsTotal' => 0, 'recordsFiltered' => 0, 'data' => []]);
+                    break;
+                }
+
+                $builder = $db->table('aa_attendance A');
+                $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
+                $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
+                $builder->join('aa_projects P', 'P.p_id = A.at_p_id', 'left');
+                $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
+                if ($emp_u_id) $builder->where('A.at_u_id', $emp_u_id);
+                if ($ew_start) $builder->where('A.at_date >=', $ew_start);
+                if ($ew_end) $builder->where('A.at_date <=', $ew_end);
+                if ($proj_id) $builder->where('A.at_p_id', $proj_id);
+                $builder->groupBy('A.at_date, A.at_u_id, A.at_p_id, A.at_t_id');
+                $builder->orderBy('A.at_date', 'ASC');
+                $builder->orderBy('U.u_name', 'ASC');
+                $builder->orderBy('P.p_name', 'ASC');
+                $ew_records = $builder->get()->getResultArray();
+
+                $ew_data = [];
+                $i = 1;
+                $ew_total = 0;
+                foreach ($ew_records as $rec) {
+                    $hrs = $this->convertHours($rec['work_hours'] ?? 0);
+                    $ew_total += $hrs;
+                    $ew_data[] = [
+                        $i++,
+                        convert_db2display($rec['at_date']),
+                        $rec['u_name'] ?? '',
+                        $rec['p_name'] ?? 'Leave',
+                        $rec['t_title'] ?? 'Leave',
+                        RevTime((int)($rec['min_start'] ?? 0)),
+                        RevTime((int)($rec['max_end'] ?? 0)),
+                        number_format($hrs, 2),
+                        $rec['comments'] ?? '',
+                    ];
+                }
+                if ($ew_total > 0) {
+                    $ew_data[] = ['', '', '', '<b>Total Hours:</b>', '', '', '', '<b>' . number_format($ew_total, 2) . '</b>', ''];
+                }
+                echo json_encode(['draw' => intval($draw), 'recordsTotal' => count($ew_records), 'recordsFiltered' => count($ew_records), 'data' => $ew_data]);
                 break;
 
             case 'projectprofitloss':

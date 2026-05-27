@@ -1102,6 +1102,183 @@ class Home extends BaseController
         return view('template', ['view_data' => $this->view_data]);
     }
 
+    public function export_project_report()
+    {
+        $session = session();
+        $admin_session = $session->get('admin_session');
+        if (!$admin_session) return redirect()->to(base_url('auth/login'));
+
+        $db = \Config\Database::connect();
+        $txt_p_status = $this->request->getPost('txt_p_status') ?? '';
+        $t_p_id = $this->request->getPost('t_p_id') ?? 0;
+        $txt_p_cat = $this->request->getPost('txt_p_cat') ?? '';
+
+        $builder = $db->table('aa_tasks T');
+        $builder->select('P.p_name, P.p_id, P.p_number, P.p_value, P.p_cat, P.p_status');
+        $builder->join('aa_projects P', 'P.p_id = T.t_p_id', 'left');
+        $builder->distinct();
+        if ($txt_p_cat) $builder->where('P.p_cat', $txt_p_cat);
+        if ($txt_p_status) $builder->where('P.p_status', $txt_p_status);
+        if ($t_p_id > 0) $builder->where('T.t_p_id', $t_p_id);
+        $builder->where('T.t_parent', 0);
+        $builder->orderBy('P.p_name', 'ASC');
+        $projects = $builder->get()->getResultArray();
+
+        $tasks_by_project = [];
+        $assigns_all = [];
+        $hours_all = [];
+        if (!empty($projects)) {
+            $p_ids = array_column($projects, 'p_id');
+            $tasks_all = $db->table('aa_tasks T')
+                ->select('T.t_id, T.t_p_id, T.t_title, T.t_priority, T.t_createdate, U.u_name as posted_by')
+                ->join('aa_users U', 'U.u_id = T.t_u_id', 'left')
+                ->whereIn('T.t_p_id', $p_ids)
+                ->where('T.t_parent', 0)
+                ->orderBy('T.t_p_id', 'ASC')
+                ->orderBy('T.t_title', 'ASC')
+                ->get()->getResultArray();
+            $t_ids = array_column($tasks_all, 't_id');
+            foreach ($tasks_all as $task) {
+                $tasks_by_project[$task['t_p_id']][] = $task;
+            }
+            if (!empty($t_ids)) {
+                $assigns_raw = $db->query("SELECT TU.tu_t_id, TU.tu_u_id, U.u_name FROM aa_task2user TU LEFT JOIN aa_users U ON TU.tu_u_id = U.u_id WHERE TU.tu_t_id IN (" . implode(',', $t_ids) . ")")->getResultArray();
+                foreach ($assigns_raw as $a) {
+                    $assigns_all[$a['tu_t_id']][] = $a;
+                }
+                $hours_raw = $db->query("SELECT at_t_id, at_u_id, SUM((at_end - at_start) / 60) as TOTALwhours FROM aa_attendance WHERE at_t_id IN (" . implode(',', $t_ids) . ") GROUP BY at_t_id, at_u_id")->getResultArray();
+                foreach ($hours_raw as $h) {
+                    $hours_all[$h['at_t_id']][$h['at_u_id']] = $h['TOTALwhours'];
+                }
+            }
+        }
+
+        $convertHours = function ($n) {
+            $whole = floor($n);
+            $fraction = $n - $whole;
+            if ($fraction == 0.75) return $whole + 0.45;
+            elseif ($fraction == 0.25) return $whole + 0.15;
+            elseif ($fraction == 0.50) return $whole + 0.30;
+            else return $whole + $fraction;
+        };
+
+        while (ob_get_level() > 0) ob_end_clean();
+        header('Content-Type: application/vnd.ms-excel');
+        header('Content-Disposition: attachment;filename="project_report_' . date('d-m-Y') . '.xls"');
+        header('Cache-Control: max-age=0');
+
+        $show_value = ($admin_session['u_type'] == 'Master Admin');
+
+        echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
+        echo '<head><meta charset="UTF-8"><style>
+            td { font-family: Arial; font-size: 10pt; vertical-align: middle; padding: 3px 6px; }
+            .report-title { background-color: #1F4E79; color: #FFFFFF; font-weight: bold; font-size: 13pt; text-align: center; }
+            .col-header { font-weight: bold; background-color: #D9E1F2; }
+            .proj-header { background-color: #FFFF00; font-weight: bold; font-size: 11pt; }
+            .sec-header { color: #FF0000; font-weight: bold; }
+            .task-col-header { font-weight: bold; background-color: #EEEEEE; }
+            .total-row { font-weight: bold; }
+        </style></head><body>';
+        echo '<table border="1" style="border-collapse:collapse;">';
+
+        $total_cols = $show_value ? 6 : 5;
+
+        // Title row
+        echo '<tr class="report-title">';
+        echo '<td colspan="' . $total_cols . '" style="text-align:center;">Project Report</td>';
+        echo '</tr>';
+
+        // Column sub-headings
+        echo '<tr class="col-header">';
+        echo '<td>Sr.</td>';
+        echo '<td>Project Name</td>';
+        echo '<td>Project Number</td>';
+        echo '<td>Project Category</td>';
+        echo '<td>Status</td>';
+        if ($show_value) echo '<td>Project Value</td>';
+        echo '</tr>';
+
+        $sr = 1;
+        foreach ($projects as $project) {
+            $p_id = $project['p_id'];
+            $tasks_list = $tasks_by_project[$p_id] ?? [];
+
+            // Project header row
+            echo '<tr class="proj-header">';
+            echo '<td>' . $sr++ . '</td>';
+            echo '<td>' . htmlspecialchars($project['p_name']) . '</td>';
+            echo '<td>' . htmlspecialchars($project['p_number']) . '</td>';
+            echo '<td>' . htmlspecialchars($project['p_cat']) . '</td>';
+            echo '<td>' . htmlspecialchars($project['p_status']) . '</td>';
+            if ($show_value) echo '<td>' . htmlspecialchars($project['p_value']) . '</td>';
+            echo '</tr>';
+
+            // Tasks / Assigns section header
+            echo '<tr class="sec-header">';
+            echo '<td colspan="2" style="text-align:center;">Tasks</td>';
+            echo '<td colspan="' . ($total_cols - 2) . '" style="text-align:center;">Assigns</td>';
+            echo '</tr>';
+
+            // Column header
+            echo '<tr class="col-header">';
+            echo '<td></td><td></td><td>Employee Name</td><td>Hrs</td><td>Cost</td>';
+            if ($show_value) echo '<td></td>';
+            echo '</tr>';
+
+            if (empty($tasks_list)) {
+                echo '<tr><td colspan="' . $total_cols . '">No Tasks</td></tr>';
+            } else {
+                $task_sr = 1;
+                foreach ($tasks_list as $task) {
+                    $assigns = $assigns_all[$task['t_id']] ?? [];
+                    $total_hrs = 0;
+                    $first_row = true;
+
+                    if (empty($assigns)) {
+                        echo '<tr>';
+                        echo '<td>' . $task_sr . '</td>';
+                        echo '<td>' . htmlspecialchars($task['t_title']) . '</td>';
+                        echo '<td colspan="' . ($total_cols - 2) . '">No Assigns</td>';
+                        echo '</tr>';
+                    } else {
+                        foreach ($assigns as $assign) {
+                            $raw = $hours_all[$task['t_id']][$assign['tu_u_id']] ?? 0;
+                            $hrs = $convertHours($raw);
+                            $total_hrs += $hrs;
+                            echo '<tr>';
+                            if ($first_row) {
+                                echo '<td>' . $task_sr . '</td>';
+                                echo '<td>' . htmlspecialchars($task['t_title']) . '</td>';
+                                $first_row = false;
+                            } else {
+                                echo '<td></td><td></td>';
+                            }
+                            echo '<td>' . htmlspecialchars($assign['u_name']) . '</td>';
+                            echo '<td>' . number_format($hrs, 2) . '</td>';
+                            echo '<td></td>';
+                            if ($show_value) echo '<td></td>';
+                            echo '</tr>';
+                        }
+                        // Total row
+                        echo '<tr class="total-row">';
+                        echo '<td></td><td></td>';
+                        echo '<td colspan="2">TOTAL HRS - ' . number_format($total_hrs, 2) . '</td>';
+                        echo '<td></td>';
+                        if ($show_value) echo '<td></td>';
+                        echo '</tr>';
+                    }
+                    $task_sr++;
+                }
+            }
+
+            // Blank separator row between projects
+            echo '<tr><td colspan="' . $total_cols . '">&nbsp;</td></tr>';
+        }
+
+        echo '</table></body></html>';
+        exit;
+    }
+
     public function report_project_employee()
     {
         $db = \Config\Database::connect();
@@ -1125,6 +1302,144 @@ class Home extends BaseController
         $this->view_data['authorization'] = $this->authorization;
         $this->view_data['plugins'] = ['datatable' => true, 'form_validation' => true];
         return view('template', ['view_data' => $this->view_data]);
+    }
+
+    public function report_employee_work()
+    {
+        $db = \Config\Database::connect();
+        $projectModel = new ProjectModel();
+        $userModel = new UserModel();
+
+        $u_type = $this->admin_session['u_type'];
+        $u_id = $this->admin_session['u_id'];
+
+        if ($this->authorization->is_bim_head_or_higher($this->admin_session) || $u_type === 'Project Leader') {
+            $users = $userModel->where('u_status', 'Active')->orderBy('u_name', 'ASC')->findAll();
+            $projects = $projectModel->orderBy('p_name', 'ASC')->findAll();
+        } else {
+            $users = $userModel->where('u_id', $u_id)->findAll();
+            $projects = $db->query("SELECT DISTINCT P.p_id, P.p_name FROM aa_task2user TU INNER JOIN aa_projects P ON TU.tu_p_id = P.p_id WHERE TU.tu_u_id = '{$u_id}' AND TU.tu_removed = 'No' ORDER BY P.p_name ASC")->getResultArray();
+        }
+
+        $year = date("Y");
+        $month = (int)date("m");
+        if ($month < 4) $year--;
+        $this->view_data['rpt_start'] = "01-04-" . $year;
+        $this->view_data['rpt_end'] = date("d-m-Y");
+        $this->view_data['users'] = $users;
+        $this->view_data['projects'] = $projects;
+        $this->view_data['u_type'] = $u_type;
+        $this->view_data['page'] = 'report_employee_work';
+        $this->view_data['page_title'] = 'Employee Work Report';
+        $this->view_data['meta_title'] = 'Employee Work Report';
+        $this->view_data['admin_session'] = $this->admin_session;
+        $this->view_data['authorization'] = $this->authorization;
+        $this->view_data['plugins'] = ['datatable' => true, 'datepicker' => true, 'form_validation' => true];
+        return view('template', ['view_data' => $this->view_data]);
+    }
+
+    public function export_employee_work_report()
+    {
+        $session = session();
+        $admin_session = $session->get('admin_session');
+        if (!$admin_session) return redirect()->to(base_url('auth/login'));
+
+        $db = \Config\Database::connect();
+        $emp_u_id = $this->request->getPost('emp_u_id') ?? '';
+        $p_id = $this->request->getPost('p_id') ?? '';
+        $rpt_start = convert_display2db($this->request->getPost('rpt_start') ?? '');
+        $rpt_end = convert_display2db($this->request->getPost('rpt_end') ?? '');
+
+        if (!$emp_u_id && !$p_id) {
+            echo 'Please select an Employee or a Project.';
+            exit;
+        }
+
+        $convertHours = function ($n) {
+            $whole = floor($n);
+            $fraction = $n - $whole;
+            if ($fraction == 0.75) return $whole + 0.45;
+            elseif ($fraction == 0.25) return $whole + 0.15;
+            elseif ($fraction == 0.50) return $whole + 0.30;
+            else return $whole + $fraction;
+        };
+
+        $builder = $db->table('aa_attendance A');
+        $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
+        $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
+        $builder->join('aa_projects P', 'P.p_id = A.at_p_id', 'left');
+        $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
+        if ($emp_u_id) $builder->where('A.at_u_id', $emp_u_id);
+        if ($rpt_start) $builder->where('A.at_date >=', $rpt_start);
+        if ($rpt_end) $builder->where('A.at_date <=', $rpt_end);
+        if ($p_id) $builder->where('A.at_p_id', $p_id);
+        $builder->groupBy('A.at_date, A.at_u_id, A.at_p_id, A.at_t_id');
+        $builder->orderBy('A.at_date', 'ASC');
+        $builder->orderBy('U.u_name', 'ASC');
+        $builder->orderBy('P.p_name', 'ASC');
+        $records = $builder->get()->getResultArray();
+
+        // Header label
+        if ($emp_u_id) {
+            $user = $db->table('aa_users')->select('u_name')->where('u_id', $emp_u_id)->get()->getRowArray();
+            $header_label = 'Employee: ' . ($user['u_name'] ?? '');
+        } else {
+            $proj = $db->table('aa_projects')->select('p_name')->where('p_id', $p_id)->get()->getRowArray();
+            $header_label = 'Project: ' . ($proj['p_name'] ?? '');
+        }
+
+        while (ob_get_level() > 0) ob_end_clean();
+        header('Content-Type: application/vnd.ms-excel');
+        header('Content-Disposition: attachment;filename="employee_work_report_' . date('d-m-Y') . '.xls"');
+        header('Cache-Control: max-age=0');
+
+        echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
+        echo '<head><meta charset="UTF-8"><style>
+            td { font-family: Arial; font-size: 10pt; padding: 3px 6px; vertical-align: middle; }
+            .rpt-header { background-color: #FFFF00; font-weight: bold; font-size: 11pt; }
+            .col-header { background-color: #EEEEEE; font-weight: bold; }
+            .total-row { background-color: #FFFFCC; font-weight: bold; }
+        </style></head><body>';
+        echo '<table border="1" style="border-collapse:collapse;">';
+
+        // Report header row
+        echo '<tr class="rpt-header">';
+        echo '<td colspan="5">' . htmlspecialchars($header_label) . '</td>';
+        echo '<td colspan="4">Period: ' . ($this->request->getPost('rpt_start') ?? '') . ' to ' . ($this->request->getPost('rpt_end') ?? '') . '</td>';
+        echo '</tr>';
+
+        // Column headers
+        echo '<tr class="col-header">';
+        echo '<td>Sr.</td><td>Date</td><td>Employee</td><td>Project Name</td><td>Task Name</td><td>Start Time</td><td>End Time</td><td>Hours</td><td>Comment</td>';
+        echo '</tr>';
+
+        $i = 1;
+        $total_hrs = 0;
+        foreach ($records as $rec) {
+            $hrs = $convertHours($rec['work_hours'] ?? 0);
+            $total_hrs += $hrs;
+            echo '<tr>';
+            echo '<td>' . $i++ . '</td>';
+            echo '<td>' . convert_db2display($rec['at_date']) . '</td>';
+            echo '<td>' . htmlspecialchars($rec['u_name'] ?? '') . '</td>';
+            echo '<td>' . htmlspecialchars($rec['p_name'] ?? 'Leave') . '</td>';
+            echo '<td>' . htmlspecialchars($rec['t_title'] ?? 'Leave') . '</td>';
+            echo '<td>' . RevTime((int)($rec['min_start'] ?? 0)) . '</td>';
+            echo '<td>' . RevTime((int)($rec['max_end'] ?? 0)) . '</td>';
+            echo '<td>' . number_format($hrs, 2) . '</td>';
+            echo '<td>' . htmlspecialchars($rec['comments'] ?? '') . '</td>';
+            echo '</tr>';
+        }
+
+        // Total row
+        echo '<tr class="total-row">';
+        echo '<td colspan="7" style="text-align:right;">Total Hours:</td>';
+        echo '<td>' . number_format($total_hrs, 2) . '</td>';
+        echo '<td></td>';
+        echo '</tr>';
+
+        echo '</table></body></html>';
+        exit;
     }
 
     public function report_profitloss()

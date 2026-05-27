@@ -92,7 +92,10 @@ $routes->get('home/report_leave_hour_date', 'Home::report_leave_hour_date');
 $routes->get('home/report_leave_hour', 'Home::report_leave_hour');
 $routes->get('home/report_message', 'Home::report_message');
 $routes->get('home/report_project', 'Home::report_project');
+$routes->post('home/export_project_report', 'Home::export_project_report');
 $routes->get('home/report_project_employee', 'Home::report_project_employee');
+$routes->get('home/report_employee_work', 'Home::report_employee_work');
+$routes->post('home/export_employee_work_report', 'Home::export_employee_work_report');
 $routes->get('home/report_profitloss', 'Home::report_profitloss');
 $routes->post('home/report_timesheet', 'Home::report_timesheet');
 
