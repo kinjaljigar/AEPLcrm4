@@ -4913,7 +4913,7 @@ class Api extends BaseController
                 if ($ew_mode === 'summary' && $proj_id) {
                     // --- Summary mode: task → employee → daily hours breakdown ---
                     $builder = $db->table('aa_attendance A');
-                    $builder->select('T.t_title, U.u_name, A.at_date, SUM((A.at_end - A.at_start) / 60) as work_hours');
+                    $builder->select('T.t_title, U.u_name, A.at_date, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
                     $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
                     $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
                     $builder->where('A.at_p_id', $proj_id);
@@ -4937,11 +4937,14 @@ class Api extends BaseController
                             $rec['t_title'] ?? 'Leave',
                             $rec['u_name'] ?? '',
                             convert_db2display($rec['at_date']),
+                            RevTime((int)($rec['min_start'] ?? 0)),
+                            RevTime((int)($rec['max_end'] ?? 0)),
                             number_format($hrs, 2),
+                            $rec['comments'] ?? '',
                         ];
                     }
                     if ($ew_total > 0) {
-                        $ew_data[] = ['', '', '', '<b>Total Hours:</b>', '<b>' . number_format($ew_total, 2) . '</b>'];
+                        $ew_data[] = ['', '', '', '', '', '<b>Total Hours:</b>', '<b>' . number_format($ew_total, 2) . '</b>', ''];
                     }
                 } else {
                     // --- Detail mode: attendance records grouped by date + task + employee ---

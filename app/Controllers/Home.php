@@ -1169,33 +1169,30 @@ class Home extends BaseController
 
         $show_value = ($admin_session['u_type'] == 'Master Admin');
 
+        $td  = 'style="font-family:Arial;font-size:10pt;vertical-align:middle;padding:3px 6px;border:1px solid #999;"';
+        $tdTitle  = 'style="font-family:Arial;font-size:13pt;font-weight:bold;text-align:center;background-color:#1F4E79;color:#FFFFFF;padding:4px 6px;border:1px solid #999;"';
+        $tdColHdr = 'style="font-family:Arial;font-size:10pt;font-weight:bold;background-color:#D9E1F2;padding:3px 6px;border:1px solid #999;"';
+        $tdProj   = 'style="font-family:Arial;font-size:11pt;font-weight:bold;background-color:#FFFF00;padding:3px 6px;border:1px solid #999;"';
+        $tdSec    = 'style="font-family:Arial;font-size:10pt;font-weight:bold;color:#FF0000;text-align:center;padding:3px 6px;border:1px solid #999;"';
+        $tdTotal  = 'style="font-family:Arial;font-size:10pt;font-weight:bold;padding:3px 6px;border:1px solid #999;"';
+
         echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
-        echo '<head><meta charset="UTF-8"><style>
-            td { font-family: Arial; font-size: 10pt; vertical-align: middle; padding: 3px 6px; }
-            .report-title { background-color: #1F4E79; color: #FFFFFF; font-weight: bold; font-size: 13pt; text-align: center; }
-            .col-header { font-weight: bold; background-color: #D9E1F2; }
-            .proj-header { background-color: #FFFF00; font-weight: bold; font-size: 11pt; }
-            .sec-header { color: #FF0000; font-weight: bold; }
-            .task-col-header { font-weight: bold; background-color: #EEEEEE; }
-            .total-row { font-weight: bold; }
-        </style></head><body>';
+        echo '<head><meta charset="UTF-8"></head><body>';
         echo '<table border="1" style="border-collapse:collapse;">';
 
         $total_cols = $show_value ? 6 : 5;
 
         // Title row
-        echo '<tr class="report-title">';
-        echo '<td colspan="' . $total_cols . '" style="text-align:center;">Project Report</td>';
-        echo '</tr>';
+        echo '<tr><td colspan="' . $total_cols . '" ' . $tdTitle . '>Project Report</td></tr>';
 
         // Column sub-headings
-        echo '<tr class="col-header">';
-        echo '<td>Sr.</td>';
-        echo '<td>Project Name</td>';
-        echo '<td>Project Number</td>';
-        echo '<td>Project Category</td>';
-        echo '<td>Status</td>';
-        if ($show_value) echo '<td>Project Value</td>';
+        echo '<tr>';
+        echo '<td ' . $tdColHdr . '>Sr.</td>';
+        echo '<td ' . $tdColHdr . '>Project Name</td>';
+        echo '<td ' . $tdColHdr . '>Project Number</td>';
+        echo '<td ' . $tdColHdr . '>Project Category</td>';
+        echo '<td ' . $tdColHdr . '>Status</td>';
+        if ($show_value) echo '<td ' . $tdColHdr . '>Project Value</td>';
         echo '</tr>';
 
         $sr = 1;
@@ -1204,29 +1201,30 @@ class Home extends BaseController
             $tasks_list = $tasks_by_project[$p_id] ?? [];
 
             // Project header row
-            echo '<tr class="proj-header">';
-            echo '<td>' . $sr++ . '</td>';
-            echo '<td>' . htmlspecialchars($project['p_name']) . '</td>';
-            echo '<td>' . htmlspecialchars($project['p_number']) . '</td>';
-            echo '<td>' . htmlspecialchars($project['p_cat']) . '</td>';
-            echo '<td>' . htmlspecialchars($project['p_status']) . '</td>';
-            if ($show_value) echo '<td>' . htmlspecialchars($project['p_value']) . '</td>';
+            echo '<tr>';
+            echo '<td ' . $tdProj . '>' . $sr++ . '</td>';
+            echo '<td ' . $tdProj . '>' . htmlspecialchars($project['p_name']) . '</td>';
+            echo '<td ' . $tdProj . '>' . htmlspecialchars($project['p_number']) . '</td>';
+            echo '<td ' . $tdProj . '>' . htmlspecialchars($project['p_cat']) . '</td>';
+            echo '<td ' . $tdProj . '>' . htmlspecialchars($project['p_status']) . '</td>';
+            if ($show_value) echo '<td ' . $tdProj . '>' . htmlspecialchars($project['p_value']) . '</td>';
             echo '</tr>';
 
             // Tasks / Assigns section header
-            echo '<tr class="sec-header">';
-            echo '<td colspan="2" style="text-align:center;">Tasks</td>';
-            echo '<td colspan="' . ($total_cols - 2) . '" style="text-align:center;">Assigns</td>';
+            echo '<tr>';
+            echo '<td colspan="2" ' . $tdSec . '>Tasks</td>';
+            echo '<td colspan="' . ($total_cols - 2) . '" ' . $tdSec . '>Assigns</td>';
             echo '</tr>';
 
             // Column header
-            echo '<tr class="col-header">';
-            echo '<td></td><td></td><td>Employee Name</td><td>Hrs</td><td>Cost</td>';
-            if ($show_value) echo '<td></td>';
+            echo '<tr>';
+            echo '<td ' . $tdColHdr . '></td><td ' . $tdColHdr . '></td>';
+            echo '<td ' . $tdColHdr . '>Employee Name</td><td ' . $tdColHdr . '>Hrs</td><td ' . $tdColHdr . '>Cost</td>';
+            if ($show_value) echo '<td ' . $tdColHdr . '></td>';
             echo '</tr>';
 
             if (empty($tasks_list)) {
-                echo '<tr><td colspan="' . $total_cols . '">No Tasks</td></tr>';
+                echo '<tr><td colspan="' . $total_cols . '" ' . $td . '>No Tasks</td></tr>';
             } else {
                 $task_sr = 1;
                 foreach ($tasks_list as $task) {
@@ -1236,9 +1234,9 @@ class Home extends BaseController
 
                     if (empty($assigns)) {
                         echo '<tr>';
-                        echo '<td>' . $task_sr . '</td>';
-                        echo '<td>' . htmlspecialchars($task['t_title']) . '</td>';
-                        echo '<td colspan="' . ($total_cols - 2) . '">No Assigns</td>';
+                        echo '<td ' . $td . '>' . $task_sr . '</td>';
+                        echo '<td ' . $td . '>' . htmlspecialchars($task['t_title']) . '</td>';
+                        echo '<td colspan="' . ($total_cols - 2) . '" ' . $td . '>No Assigns</td>';
                         echo '</tr>';
                     } else {
                         foreach ($assigns as $assign) {
@@ -1247,24 +1245,24 @@ class Home extends BaseController
                             $total_hrs += $hrs;
                             echo '<tr>';
                             if ($first_row) {
-                                echo '<td>' . $task_sr . '</td>';
-                                echo '<td>' . htmlspecialchars($task['t_title']) . '</td>';
+                                echo '<td ' . $td . '>' . $task_sr . '</td>';
+                                echo '<td ' . $td . '>' . htmlspecialchars($task['t_title']) . '</td>';
                                 $first_row = false;
                             } else {
-                                echo '<td></td><td></td>';
+                                echo '<td ' . $td . '></td><td ' . $td . '></td>';
                             }
-                            echo '<td>' . htmlspecialchars($assign['u_name']) . '</td>';
-                            echo '<td>' . number_format($hrs, 2) . '</td>';
-                            echo '<td></td>';
-                            if ($show_value) echo '<td></td>';
+                            echo '<td ' . $td . '>' . htmlspecialchars($assign['u_name']) . '</td>';
+                            echo '<td ' . $td . '>' . number_format($hrs, 2) . '</td>';
+                            echo '<td ' . $td . '></td>';
+                            if ($show_value) echo '<td ' . $td . '></td>';
                             echo '</tr>';
                         }
                         // Total row
-                        echo '<tr class="total-row">';
-                        echo '<td></td><td></td>';
-                        echo '<td colspan="2">TOTAL HRS - ' . number_format($total_hrs, 2) . '</td>';
-                        echo '<td></td>';
-                        if ($show_value) echo '<td></td>';
+                        echo '<tr>';
+                        echo '<td ' . $tdTotal . '></td><td ' . $tdTotal . '></td>';
+                        echo '<td colspan="2" ' . $tdTotal . '>TOTAL HRS - ' . number_format($total_hrs, 2) . '</td>';
+                        echo '<td ' . $tdTotal . '></td>';
+                        if ($show_value) echo '<td ' . $tdTotal . '></td>';
                         echo '</tr>';
                     }
                     $task_sr++;
@@ -1272,7 +1270,7 @@ class Home extends BaseController
             }
 
             // Blank separator row between projects
-            echo '<tr><td colspan="' . $total_cols . '">&nbsp;</td></tr>';
+            echo '<tr><td colspan="' . $total_cols . '" ' . $td . '>&nbsp;</td></tr>';
         }
 
         echo '</table></body></html>';

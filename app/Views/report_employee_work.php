@@ -99,12 +99,12 @@ function LoadData() {
     var mode = isSummary ? 'summary' : 'detail';
 
     if (isSummary) {
-        $('#dataTable_head').html('<th>Sr.</th><th>Task Name</th><th>Employee</th><th>Date</th><th>Hours</th>');
+        $('#dataTable_head').html('<th>Sr.</th><th>Task Name</th><th>Employee</th><th>Date</th><th>Start Time</th><th>End Time</th><th>Hours</th><th>Comment</th>');
     } else {
         $('#dataTable_head').html('<th>Sr.</th><th>Date</th><th>Employee</th><th>Project Name</th><th>Task Name</th><th>Start Time</th><th>End Time</th><th>Hours</th><th>Comment</th>');
     }
 
-    var colCount = isSummary ? 5 : 9;
+    var colCount = isSummary ? 8 : 9;
     var targets  = [];
     for (var c = 0; c < colCount; c++) targets.push(c);
 

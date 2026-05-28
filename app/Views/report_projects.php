@@ -115,8 +115,7 @@ function LoadData() {
         pageLength: 10000,
         stripeClasses: ['r0', 'r1'],
         bSort: false,
-        dom: 'Blfrtip',
-        "buttons": true,
+        dom: 'lfrtip',
         "columnDefs": [
             /*{
                             "targets": [0],
