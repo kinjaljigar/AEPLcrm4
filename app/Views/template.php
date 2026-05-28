@@ -193,7 +193,7 @@ if (isset($view_data['plugins'])) {
 
                             $multi_levelReport['project_report'] = array('Project Report', 'home/report_project', 'fa-hand-o-right');
                             $multi_levelReport['employee_project_report'] = array('Employee Project Report', 'home/report_project_employee', 'fa-hand-o-right');
-                            $multi_levelReport['employee_work_report'] = array('Employee Work Report', 'home/report_employee_work', 'fa-hand-o-right');
+                            $multi_levelReport['employee_work_report'] = array('Employee Project Work Report', 'home/report_employee_work', 'fa-hand-o-right');
                             $multi_levelReport['project_profitreport'] = array('Profit/Loss Report', 'home/report_profitloss', 'fa-hand-o-right');
                             $menu['tickets'] = array('Tickets', '#', 'fa-file', $multi_levelticket);
                             $menu['CRM'] = array('CRM', '#', 'fa-file', $multi_level);

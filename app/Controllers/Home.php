@@ -1324,8 +1324,8 @@ class Home extends BaseController
         $year = date("Y");
         $month = (int)date("m");
         if ($month < 4) $year--;
-        $this->view_data['rpt_start'] = "01-04-" . $year;
-        $this->view_data['rpt_end'] = date("d-m-Y");
+        $this->view_data['rpt_start'] = '';
+        $this->view_data['rpt_end'] = '';
         $this->view_data['users'] = $users;
         $this->view_data['projects'] = $projects;
         $this->view_data['u_type'] = $u_type;

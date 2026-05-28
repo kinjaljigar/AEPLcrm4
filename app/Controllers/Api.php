@@ -4728,13 +4728,11 @@ class Api extends BaseController
                 foreach ($records as $rec) {
                     $nestedData = [];
                     $nestedData[] = $i++;
-                    if ($t_p_id <= 0) {
-                        $nestedData[] = $rec['p_name'];
-                        $nestedData[] = $rec['p_number'];
-                        if (in_array($admin_session['u_type'], ['Master Admin'])) $nestedData[] = $rec['p_value'];
-                        $nestedData[] = $rec['p_cat'];
-                        $nestedData[] = $rec['p_status'];
-                    }
+                    $nestedData[] = $rec['p_name'];
+                    $nestedData[] = $rec['p_number'];
+                    if (in_array($admin_session['u_type'], ['Master Admin'])) $nestedData[] = $rec['p_value'];
+                    $nestedData[] = $rec['p_cat'];
+                    $nestedData[] = $rec['p_status'];
                     $tasks_list = $tasks_by_project[$rec['p_id']] ?? [];
                     if (!empty($tasks_list)) {
                         $task_text = '';
@@ -4902,52 +4900,89 @@ class Api extends BaseController
 
             case 'employee_work':
                 $emp_u_id = $request->getPost('emp_u_id') ?? '';
-                $proj_id = $request->getPost('p_id') ?? '';
+                $proj_id  = $request->getPost('p_id') ?? '';
                 $ew_start = convert_display2db($request->getPost('rpt_start') ?? '');
-                $ew_end = convert_display2db($request->getPost('rpt_end') ?? '');
+                $ew_end   = convert_display2db($request->getPost('rpt_end') ?? '');
+                $ew_mode  = $request->getPost('mode') ?? 'detail'; // 'summary' or 'detail'
 
                 if (!$emp_u_id && !$proj_id) {
                     echo json_encode(['draw' => intval($draw), 'recordsTotal' => 0, 'recordsFiltered' => 0, 'data' => []]);
                     break;
                 }
 
-                $builder = $db->table('aa_attendance A');
-                $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
-                $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
-                $builder->join('aa_projects P', 'P.p_id = A.at_p_id', 'left');
-                $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
-                if ($emp_u_id) $builder->where('A.at_u_id', $emp_u_id);
-                if ($ew_start) $builder->where('A.at_date >=', $ew_start);
-                if ($ew_end) $builder->where('A.at_date <=', $ew_end);
-                if ($proj_id) $builder->where('A.at_p_id', $proj_id);
-                $builder->groupBy('A.at_date, A.at_u_id, A.at_p_id, A.at_t_id');
-                $builder->orderBy('A.at_date', 'ASC');
-                $builder->orderBy('U.u_name', 'ASC');
-                $builder->orderBy('P.p_name', 'ASC');
-                $ew_records = $builder->get()->getResultArray();
+                if ($ew_mode === 'summary' && $proj_id) {
+                    // --- Summary mode: task → employee → daily hours breakdown ---
+                    $builder = $db->table('aa_attendance A');
+                    $builder->select('T.t_title, U.u_name, A.at_date, SUM((A.at_end - A.at_start) / 60) as work_hours');
+                    $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
+                    $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
+                    $builder->where('A.at_p_id', $proj_id);
+                    if ($emp_u_id) $builder->where('A.at_u_id', $emp_u_id);
+                    if ($ew_start) $builder->where('A.at_date >=', $ew_start);
+                    if ($ew_end)   $builder->where('A.at_date <=', $ew_end);
+                    $builder->groupBy('A.at_t_id, A.at_u_id, A.at_date');
+                    $builder->orderBy('T.t_title', 'ASC');
+                    $builder->orderBy('U.u_name', 'ASC');
+                    $builder->orderBy('A.at_date', 'ASC');
+                    $ew_records = $builder->get()->getResultArray();
 
-                $ew_data = [];
-                $i = 1;
-                $ew_total = 0;
-                foreach ($ew_records as $rec) {
-                    $hrs = $this->convertHours($rec['work_hours'] ?? 0);
-                    $ew_total += $hrs;
-                    $ew_data[] = [
-                        $i++,
-                        convert_db2display($rec['at_date']),
-                        $rec['u_name'] ?? '',
-                        $rec['p_name'] ?? 'Leave',
-                        $rec['t_title'] ?? 'Leave',
-                        RevTime((int)($rec['min_start'] ?? 0)),
-                        RevTime((int)($rec['max_end'] ?? 0)),
-                        number_format($hrs, 2),
-                        $rec['comments'] ?? '',
-                    ];
+                    $ew_data  = [];
+                    $i        = 1;
+                    $ew_total = 0;
+                    foreach ($ew_records as $rec) {
+                        $hrs = $this->convertHours($rec['work_hours'] ?? 0);
+                        $ew_total += $hrs;
+                        $ew_data[] = [
+                            $i++,
+                            $rec['t_title'] ?? 'Leave',
+                            $rec['u_name'] ?? '',
+                            convert_db2display($rec['at_date']),
+                            number_format($hrs, 2),
+                        ];
+                    }
+                    if ($ew_total > 0) {
+                        $ew_data[] = ['', '', '', '<b>Total Hours:</b>', '<b>' . number_format($ew_total, 2) . '</b>'];
+                    }
+                } else {
+                    // --- Detail mode: attendance records grouped by date + task + employee ---
+                    $builder = $db->table('aa_attendance A');
+                    $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
+                    $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
+                    $builder->join('aa_projects P', 'P.p_id = A.at_p_id', 'left');
+                    $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
+                    if ($emp_u_id) $builder->where('A.at_u_id', $emp_u_id);
+                    if ($ew_start) $builder->where('A.at_date >=', $ew_start);
+                    if ($ew_end)   $builder->where('A.at_date <=', $ew_end);
+                    if ($proj_id)  $builder->where('A.at_p_id', $proj_id);
+                    $builder->groupBy('T.t_title, A.at_u_id, A.at_date, A.at_p_id, A.at_t_id');
+                    $builder->orderBy('T.t_title', 'ASC');
+                    $builder->orderBy('U.u_name', 'ASC');
+                    $builder->orderBy('A.at_date', 'ASC');
+                    $ew_records = $builder->get()->getResultArray();
+
+                    $ew_data  = [];
+                    $i        = 1;
+                    $ew_total = 0;
+                    foreach ($ew_records as $rec) {
+                        $hrs = $this->convertHours($rec['work_hours'] ?? 0);
+                        $ew_total += $hrs;
+                        $ew_data[] = [
+                            $i++,
+                            convert_db2display($rec['at_date']),
+                            $rec['u_name'] ?? '',
+                            $rec['p_name'] ?? 'Leave',
+                            $rec['t_title'] ?? 'Leave',
+                            RevTime((int)($rec['min_start'] ?? 0)),
+                            RevTime((int)($rec['max_end'] ?? 0)),
+                            number_format($hrs, 2),
+                            $rec['comments'] ?? '',
+                        ];
+                    }
+                    if ($ew_total > 0) {
+                        $ew_data[] = ['', '', '', '<b>Total Hours:</b>', '', '', '', '<b>' . number_format($ew_total, 2) . '</b>', ''];
+                    }
                 }
-                if ($ew_total > 0) {
-                    $ew_data[] = ['', '', '', '<b>Total Hours:</b>', '', '', '', '<b>' . number_format($ew_total, 2) . '</b>', ''];
-                }
-                echo json_encode(['draw' => intval($draw), 'recordsTotal' => count($ew_records), 'recordsFiltered' => count($ew_records), 'data' => $ew_data]);
+                echo json_encode(['draw' => intval($draw), 'recordsTotal' => count($ew_data), 'recordsFiltered' => count($ew_data), 'data' => $ew_data]);
                 break;
 
             case 'projectprofitloss':

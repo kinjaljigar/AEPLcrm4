@@ -1,6 +1,6 @@
 <div class="content-wrapper">
     <section class="content-header">
-        <h1>Employee Work Report</h1>
+        <h1>Employee Project Work Report</h1>
     </section>
     <section class="content">
         <div class="box box-primary">
@@ -41,26 +41,14 @@
                         <button type="button" onclick="LoadData();" class="btn btn-primary margin">
                             <i class="fa fa-search"></i> Show Report
                         </button>
-                        <button type="button" onclick="ExportExcel();" class="btn btn-success margin">
-                            <i class="fa fa-file-excel-o"></i> Export Excel
-                        </button>
                     </div>
                 </div>
-
-                <!-- Hidden form for Excel export -->
-                <form id="export_form" action="<?php echo base_url('home/export_employee_work_report'); ?>" method="post" target="_blank" style="display:none;">
-                    <?php echo csrf_field(); ?>
-                    <input type="hidden" id="exp_emp_u_id" name="emp_u_id" />
-                    <input type="hidden" id="exp_p_id" name="p_id" />
-                    <input type="hidden" id="exp_rpt_start" name="rpt_start" />
-                    <input type="hidden" id="exp_rpt_end" name="rpt_end" />
-                </form>
 
                 <br />
                 <div id="report_table_wrap">
                     <table id="dataTable" class="table table-bordered table-hover responsive nowrap" width="100%">
                         <thead>
-                            <tr>
+                            <tr id="dataTable_head">
                                 <th>Sr.</th>
                                 <th>Date</th>
                                 <th>Employee</th>
@@ -73,7 +61,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            <tr><td colspan="9">Please select an <b>Employee</b> or <b>Project</b> and <b>Date Range</b> to load report.</td></tr>
+                            <tr><td colspan="9">Please select a <b>Project</b> (or Employee) and click <b>Show Report</b>. Date range is optional.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -98,27 +86,27 @@ function document_ready() {
     <?php } ?>
 }
 
-function ExportExcel() {
-    var emp = $('#emp_u_id').val();
-    var proj = $('#p_id').val();
-    if (!emp && !proj) { alert('Please select an Employee or a Project.'); return; }
-    var rs = $('#rpt_start').val();
-    var re = $('#rpt_end').val();
-    if (!rs || !re) { alert('Please select From Date and To Date.'); return; }
-    $('#exp_emp_u_id').val(emp);
-    $('#exp_p_id').val(proj);
-    $('#exp_rpt_start').val(rs);
-    $('#exp_rpt_end').val(re);
-    $('#export_form').submit();
-}
 
 function LoadData() {
-    var emp = $('#emp_u_id').val();
+    var emp  = $('#emp_u_id').val();
     var proj = $('#p_id').val();
     if (!emp && !proj) { alert('Please select an Employee or a Project.'); return; }
     var rs = $('#rpt_start').val();
     var re = $('#rpt_end').val();
-    if (!rs || !re) { alert('Please select From Date and To Date.'); return; }
+
+    // Summary mode: any time a project is selected
+    var isSummary = (proj !== '');
+    var mode = isSummary ? 'summary' : 'detail';
+
+    if (isSummary) {
+        $('#dataTable_head').html('<th>Sr.</th><th>Task Name</th><th>Employee</th><th>Date</th><th>Hours</th>');
+    } else {
+        $('#dataTable_head').html('<th>Sr.</th><th>Date</th><th>Employee</th><th>Project Name</th><th>Task Name</th><th>Start Time</th><th>End Time</th><th>Hours</th><th>Comment</th>');
+    }
+
+    var colCount = isSummary ? 5 : 9;
+    var targets  = [];
+    for (var c = 0; c < colCount; c++) targets.push(c);
 
     var dtConf = {
         "ajax": {
@@ -130,6 +118,7 @@ function LoadData() {
                 "p_id": proj,
                 "rpt_start": rs,
                 "rpt_end": re,
+                "mode": mode,
             }
         },
         "processing": true,
@@ -141,11 +130,7 @@ function LoadData() {
         bSort: false,
         dom: 'Blfrtip',
         "buttons": true,
-        "columnDefs": [{
-            "targets": [0, 1, 2, 3, 4, 5, 6, 7, 8],
-            "searchable": false,
-            "orderable": false,
-        }],
+        "columnDefs": [{"targets": targets, "searchable": false, "orderable": false}],
         "oLanguage": {
             "sEmptyTable": "No work records found for the selected criteria.",
         },
