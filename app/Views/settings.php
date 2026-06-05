@@ -142,12 +142,7 @@
 
     function saveMain(sType) {
         STYPE = sType;
-        var rules = {
-            s_value: {
-                required: true
-            },
-
-        };
+        var rules = {};
         var form = setValidation('#admin_add_form', rules);
         var isValid = form.valid();
         if (isValid == true) {

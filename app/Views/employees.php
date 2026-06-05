@@ -98,7 +98,7 @@
                 <div class="form-group">
                     <label for="u_photo">Photo <span class="explain-tip edit_only">No need to select if keep existing as
                             it is.</span></label>
-                    <input type="file" class="form-control" id="u_photo" name="u_photo" value="" placeholder="">
+                    <input type="file" class="form-control" id="u_photo" name="logo_file" value="" placeholder="" accept="image/*">
                 </div>
             </div>
             <div class="col-lg-4 col-md-6 col-sm-12">
@@ -151,6 +151,14 @@
                     <option value="1">Active</option>
                     <option value="0" selected>Deactive</option>
                 </select>
+            </div>
+            <div class="form-group col-lg-4 col-md-6 col-sm-12">
+                <label for="u_all_ips">Access from All IPs</label>
+                <select class="form-control" name="u_all_ips" id="u_all_ips">
+                    <option value="No" selected>No (Valid IPs only)</option>
+                    <option value="Yes">Yes (Any IP)</option>
+                </select>
+                <span class="explain-tip">Applies to Employee, Project Leader, TaskCoordinator, MailCoordinator only.</span>
             </div>
             <div class="col-lg-4 col-md-6 col-sm-12">
                 <div class="form-group">

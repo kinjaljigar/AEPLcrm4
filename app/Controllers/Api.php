@@ -29,10 +29,35 @@ class Api extends BaseController
             $user = $userModel->verifyLogin($username, $password);
 
             if ($user) {
-                    // Force reset login status (handles browser crash / PC shutdown scenarios)
-                    // If user was previously logged in, allow re-login by resetting the flag
-                    $userModel->updateLoginStatus($user['u_id'], 1);
+                $db = \Config\Database::connect();
 
+                // IP restriction check for restricted roles
+                $restrictedRoles = ['Employee', 'Project Leader', 'TaskCoordinator', 'MailCoordinator'];
+                if (in_array($user['u_type'], $restrictedRoles)) {
+                    $userRow = $db->query("SELECT u_all_ips FROM aa_users WHERE u_id = " . intval($user['u_id']))->getRowArray();
+                    $u_all_ips = $userRow['u_all_ips'] ?? 'No';
+                    if ($u_all_ips !== 'Yes') {
+                        $clientIp = $request->getIPAddress();
+                        // Developer IPs always bypass restriction
+                        $devSetting = $db->table('aa_settings')->where('s_key', 'developer_ips')->get()->getRowArray();
+                        $devIps = array_filter(array_map('trim', preg_split('/[,;\n\r]+/', $devSetting['s_value'] ?? '')));
+                        if (!in_array($clientIp, $devIps)) {
+                            // Not a developer IP — check valid_ips
+                            $ipSetting = $db->table('aa_settings')->where('s_key', 'valid_ips')->get()->getRowArray();
+                            $validIps = array_filter(array_map('trim', preg_split('/[,;\n\r]+/', $ipSetting['s_value'] ?? '')));
+                            if (!empty($validIps) && !in_array($clientIp, $validIps)) {
+                                echo json_encode([
+                                    'status' => 'fail',
+                                    'message' => 'Access denied. Your IP address (' . $clientIp . ') is not authorised to access this system.'
+                                ]);
+                                exit;
+                            }
+                        }
+                    }
+                }
+
+                // IP check passed — mark as logged in
+                $userModel->updateLoginStatus($user['u_id'], 1);
                     // Set session data - include all user fields
                     $admin_session = [
                         'u_id' => $user['u_id'],
@@ -1719,6 +1744,7 @@ class Api extends BaseController
                 'u_leader' => $request->getPost('u_leader') ?? 0,
                 'u_salary' => $request->getPost('u_salary') ?? 0,
                 'u_app_auth' => $request->getPost('u_app_auth') ?? '0',
+                'u_all_ips' => $request->getPost('u_all_ips') ?? 'No',
                 'u_join_date' => !empty($request->getPost('u_join_date')) ? convert_display2db($request->getPost('u_join_date')) : '0000-00-00',
                 'u_leave_date' => !empty($request->getPost('u_leave_date')) ? convert_display2db($request->getPost('u_leave_date')) : '0000-00-00',
                 'u_comments' => $request->getPost('u_comments') ?? '',
@@ -1759,6 +1785,11 @@ class Api extends BaseController
                 $u_id = (int)($maxRow['max_id'] ?? 0) + 1;
                 $userData['u_id'] = $u_id;
                 $db->table('aa_users')->insert($userData);
+                // Delete any leftover photo from a previously deleted employee with the same u_id
+                $oldPhoto = ROOTPATH . 'assets/logos/ulogo_' . $u_id . '.jpg';
+                if (file_exists($oldPhoto)) {
+                    unlink($oldPhoto);
+                }
                 // Set birthdate after insert via raw query
                 if ($birthdateRaw !== null) {
                     $db->query("UPDATE aa_users SET u_birthdate = ? WHERE u_id = ?", [$birthdateRaw, $u_id]);
