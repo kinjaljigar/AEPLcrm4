@@ -4944,17 +4944,17 @@ class Api extends BaseController
                 if ($ew_mode === 'summary' && $proj_id) {
                     // --- Summary mode: task → employee → daily hours breakdown ---
                     $builder = $db->table('aa_attendance A');
-                    $builder->select('T.t_title, U.u_name, A.at_date, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
+                    $builder->select('T.t_title, U.u_name, A.at_date, A.at_start, A.at_end, (A.at_end - A.at_start) / 60 as work_hours, A.at_comment as comments');
                     $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
                     $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
                     $builder->where('A.at_p_id', $proj_id);
                     if ($emp_u_id) $builder->where('A.at_u_id', $emp_u_id);
                     if ($ew_start) $builder->where('A.at_date >=', $ew_start);
                     if ($ew_end)   $builder->where('A.at_date <=', $ew_end);
-                    $builder->groupBy('A.at_t_id, A.at_u_id, A.at_date');
                     $builder->orderBy('T.t_title', 'ASC');
                     $builder->orderBy('U.u_name', 'ASC');
                     $builder->orderBy('A.at_date', 'ASC');
+                    $builder->orderBy('A.at_start', 'ASC');
                     $ew_records = $builder->get()->getResultArray();
 
                     $ew_data      = [];
@@ -4968,7 +4968,7 @@ class Api extends BaseController
                             $rec['t_title'] ?? 'Leave',
                             $rec['u_name'] ?? '',
                             convert_db2display($rec['at_date']),
-                            RevTime((int)($rec['min_start'] ?? 0)) . ' - ' . RevTime((int)($rec['max_end'] ?? 0)),
+                            RevTime((int)($rec['at_start'] ?? 0)) . ' - ' . RevTime((int)($rec['at_end'] ?? 0)),
                             // number_format($this->convertHours($raw), 2), // Hours - hidden
                             $rec['comments'] ?? '',
                         ];
@@ -4977,9 +4977,9 @@ class Api extends BaseController
                     //     $ew_data[] = ['', '', '', '', '', '<b>Total Hours:</b>', '<b>' . number_format($this->convertHours($ew_raw_total), 2) . '</b>', ''];
                     // }
                 } else {
-                    // --- Detail mode: attendance records grouped by date + task + employee ---
+                    // --- Detail mode: individual attendance records per time slot ---
                     $builder = $db->table('aa_attendance A');
-                    $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
+                    $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, A.at_start, A.at_end, (A.at_end - A.at_start) / 60 as work_hours, A.at_comment as comments');
                     $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
                     $builder->join('aa_projects P', 'P.p_id = A.at_p_id', 'left');
                     $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
@@ -4987,10 +4987,10 @@ class Api extends BaseController
                     if ($ew_start) $builder->where('A.at_date >=', $ew_start);
                     if ($ew_end)   $builder->where('A.at_date <=', $ew_end);
                     if ($proj_id)  $builder->where('A.at_p_id', $proj_id);
-                    $builder->groupBy('T.t_title, A.at_u_id, A.at_date, A.at_p_id, A.at_t_id');
                     $builder->orderBy('T.t_title', 'ASC');
                     $builder->orderBy('U.u_name', 'ASC');
                     $builder->orderBy('A.at_date', 'ASC');
+                    $builder->orderBy('A.at_start', 'ASC');
                     $ew_records = $builder->get()->getResultArray();
 
                     $ew_data      = [];
@@ -5005,7 +5005,7 @@ class Api extends BaseController
                             $rec['u_name'] ?? '',
                             $rec['p_name'] ?? 'Leave',
                             $rec['t_title'] ?? 'Leave',
-                            RevTime((int)($rec['min_start'] ?? 0)) . ' - ' . RevTime((int)($rec['max_end'] ?? 0)),
+                            RevTime((int)($rec['at_start'] ?? 0)) . ' - ' . RevTime((int)($rec['at_end'] ?? 0)),
                             // number_format($this->convertHours($raw), 2), // Hours - hidden
                             $rec['comments'] ?? '',
                         ];
@@ -5263,19 +5263,19 @@ class Api extends BaseController
 
         // ── Fetch records ──────────────────────────────────────────────────
         if ($ew_mode === 'summary' && $proj_id) {
-            // Summary: project selected → columns: Employee | Date | Start | End | Hours | Comment
+            // Summary: project selected → columns: Employee | Date | Time | Comment
             $builder = $db->table('aa_attendance A');
-            $builder->select('T.t_title, U.u_name, A.at_date, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
+            $builder->select('T.t_title, U.u_name, A.at_date, A.at_start, A.at_end, (A.at_end - A.at_start) / 60 as work_hours, A.at_comment as comments');
             $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
             $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
             $builder->where('A.at_p_id', $proj_id);
             if ($emp_u_id) $builder->where('A.at_u_id', $emp_u_id);
             if ($ew_start)  $builder->where('A.at_date >=', $ew_start);
             if ($ew_end)    $builder->where('A.at_date <=', $ew_end);
-            $builder->groupBy('A.at_t_id, A.at_u_id, A.at_date');
             $builder->orderBy('T.t_title', 'ASC');
             $builder->orderBy('U.u_name', 'ASC');
             $builder->orderBy('A.at_date', 'ASC');
+            $builder->orderBy('A.at_start', 'ASC');
             $records = $builder->get()->getResultArray();
 
             $headers = ['Employee', 'Date', 'Time', /* 'Hours', */ 'Comment'];
@@ -5287,17 +5287,15 @@ class Api extends BaseController
                 $grouped[$task_key][] = [
                     'user'      => $rec['u_name'] ?? '',
                     'date'      => convert_db2display($rec['at_date']),
-                    'time'      => RevTime((int)($rec['min_start'] ?? 0)) . ' - ' . RevTime((int)($rec['max_end'] ?? 0)),
-                    // 'start'     => RevTime((int)($rec['min_start'] ?? 0)), // hidden
-                    // 'end'       => RevTime((int)($rec['max_end'] ?? 0)),   // hidden
+                    'time'      => RevTime((int)($rec['at_start'] ?? 0)) . ' - ' . RevTime((int)($rec['at_end'] ?? 0)),
                     'hours_raw' => (float)($rec['work_hours'] ?? 0),
                     'comment'   => $rec['comments'] ?? '',
                 ];
             }
         } else {
-            // Detail: employee selected → columns: Date | Employee | Project | Start | End | Hours | Comment
+            // Detail: employee selected → columns: Date | Employee | Project | Time | Comment
             $builder = $db->table('aa_attendance A');
-            $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
+            $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, A.at_start, A.at_end, (A.at_end - A.at_start) / 60 as work_hours, A.at_comment as comments');
             $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
             $builder->join('aa_projects P', 'P.p_id = A.at_p_id', 'left');
             $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
@@ -5305,10 +5303,10 @@ class Api extends BaseController
             if ($ew_start)  $builder->where('A.at_date >=', $ew_start);
             if ($ew_end)    $builder->where('A.at_date <=', $ew_end);
             if ($proj_id)   $builder->where('A.at_p_id', $proj_id);
-            $builder->groupBy('T.t_title, A.at_u_id, A.at_date, A.at_p_id, A.at_t_id');
             $builder->orderBy('T.t_title', 'ASC');
             $builder->orderBy('U.u_name', 'ASC');
             $builder->orderBy('A.at_date', 'ASC');
+            $builder->orderBy('A.at_start', 'ASC');
             $records = $builder->get()->getResultArray();
 
             $headers = ['Date', 'Employee', 'Project', 'Time', /* 'Hours', */ 'Comment'];
@@ -5321,9 +5319,7 @@ class Api extends BaseController
                     'date'      => convert_db2display($rec['at_date']),
                     'user'      => $rec['u_name'] ?? '',
                     'project'   => $rec['p_name'] ?? '',
-                    'time'      => RevTime((int)($rec['min_start'] ?? 0)) . ' - ' . RevTime((int)($rec['max_end'] ?? 0)),
-                    // 'start'     => RevTime((int)($rec['min_start'] ?? 0)), // hidden
-                    // 'end'       => RevTime((int)($rec['max_end'] ?? 0)),   // hidden
+                    'time'      => RevTime((int)($rec['at_start'] ?? 0)) . ' - ' . RevTime((int)($rec['at_end'] ?? 0)),
                     'hours_raw' => (float)($rec['work_hours'] ?? 0),
                     'comment'   => $rec['comments'] ?? '',
                 ];

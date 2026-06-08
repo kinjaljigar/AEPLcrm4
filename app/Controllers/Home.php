@@ -1363,7 +1363,7 @@ class Home extends BaseController
         };
 
         $builder = $db->table('aa_attendance A');
-        $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
+        $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, A.at_start, A.at_end, (A.at_end - A.at_start) / 60 as work_hours, A.at_comment as comments');
         $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
         $builder->join('aa_projects P', 'P.p_id = A.at_p_id', 'left');
         $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
@@ -1371,10 +1371,10 @@ class Home extends BaseController
         if ($rpt_start) $builder->where('A.at_date >=', $rpt_start);
         if ($rpt_end) $builder->where('A.at_date <=', $rpt_end);
         if ($p_id) $builder->where('A.at_p_id', $p_id);
-        $builder->groupBy('A.at_date, A.at_u_id, A.at_p_id, A.at_t_id');
         $builder->orderBy('A.at_date', 'ASC');
         $builder->orderBy('U.u_name', 'ASC');
         $builder->orderBy('P.p_name', 'ASC');
+        $builder->orderBy('A.at_start', 'ASC');
         $records = $builder->get()->getResultArray();
 
         // Header label
@@ -1402,13 +1402,13 @@ class Home extends BaseController
 
         // Report header row
         echo '<tr class="rpt-header">';
-        echo '<td colspan="5">' . htmlspecialchars($header_label) . '</td>';
-        echo '<td colspan="4">Period: ' . ($this->request->getPost('rpt_start') ?? '') . ' to ' . ($this->request->getPost('rpt_end') ?? '') . '</td>';
+        echo '<td colspan="4">' . htmlspecialchars($header_label) . '</td>';
+        echo '<td colspan="3">Period: ' . ($this->request->getPost('rpt_start') ?? '') . ' to ' . ($this->request->getPost('rpt_end') ?? '') . '</td>';
         echo '</tr>';
 
         // Column headers
         echo '<tr class="col-header">';
-        echo '<td>Sr.</td><td>Date</td><td>Employee</td><td>Project Name</td><td>Task Name</td><td>Start Time</td><td>End Time</td><td>Hours</td><td>Comment</td>';
+        echo '<td>Sr.</td><td>Date</td><td>Employee</td><td>Project Name</td><td>Task Name</td><td>Time</td><!--<td>Hours</td>--><td>Comment</td>';
         echo '</tr>';
 
         $i = 1;
@@ -1422,18 +1422,17 @@ class Home extends BaseController
             echo '<td>' . htmlspecialchars($rec['u_name'] ?? '') . '</td>';
             echo '<td>' . htmlspecialchars($rec['p_name'] ?? 'Leave') . '</td>';
             echo '<td>' . htmlspecialchars($rec['t_title'] ?? 'Leave') . '</td>';
-            echo '<td>' . RevTime((int)($rec['min_start'] ?? 0)) . '</td>';
-            echo '<td>' . RevTime((int)($rec['max_end'] ?? 0)) . '</td>';
-            echo '<td>' . number_format($hrs, 2) . '</td>';
+            echo '<td>' . RevTime((int)($rec['at_start'] ?? 0)) . ' - ' . RevTime((int)($rec['at_end'] ?? 0)) . '</td>';
+            // echo '<td>' . number_format($hrs, 2) . '</td>'; // Hours per row — hidden, uncomment if needed
             echo '<td>' . htmlspecialchars($rec['comments'] ?? '') . '</td>';
             echo '</tr>';
         }
 
         // Total row
         echo '<tr class="total-row">';
-        echo '<td colspan="7" style="text-align:right;">Total Hours:</td>';
+        echo '<td colspan="5"></td>';
+        echo '<td style="text-align:right;">Total Hours:</td>';
         echo '<td>' . number_format($total_hrs, 2) . '</td>';
-        echo '<td></td>';
         echo '</tr>';
 
         echo '</table></body></html>';
