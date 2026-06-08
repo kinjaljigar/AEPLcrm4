@@ -1240,9 +1240,9 @@ class Home extends BaseController
                         echo '</tr>';
                     } else {
                         foreach ($assigns as $assign) {
-                            $raw = $hours_all[$task['t_id']][$assign['tu_u_id']] ?? 0;
-                            $hrs = $convertHours($raw);
-                            $total_hrs += $hrs;
+                            $raw        = $hours_all[$task['t_id']][$assign['tu_u_id']] ?? 0;
+                            $hrs        = $convertHours($raw);
+                            $total_hrs += $raw;   // sum raw decimal hours, not H.MM values
                             echo '<tr>';
                             if ($first_row) {
                                 echo '<td ' . $td . '>' . $task_sr . '</td>';
@@ -1260,7 +1260,7 @@ class Home extends BaseController
                         // Total row
                         echo '<tr>';
                         echo '<td ' . $tdTotal . '></td><td ' . $tdTotal . '></td>';
-                        echo '<td colspan="2" ' . $tdTotal . '>TOTAL HRS - ' . number_format($total_hrs, 2) . '</td>';
+                        echo '<td colspan="2" ' . $tdTotal . '>TOTAL HRS - ' . number_format($convertHours($total_hrs), 2) . '</td>';
                         echo '<td ' . $tdTotal . '></td>';
                         if ($show_value) echo '<td ' . $tdTotal . '></td>';
                         echo '</tr>';

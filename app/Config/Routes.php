@@ -34,6 +34,7 @@ $routes->post('api/dependency', 'Api::dependency');
 $routes->post('api/weeklywork', 'Api::weeklywork');
 $routes->post('api/project_contacts', 'Api::project_contacts');
 $routes->post('api/reports', 'Api::reports');
+$routes->get('api/export_employee_work', 'Api::export_employee_work');
 $routes->post('api/messages', 'Api::messages');
 $routes->post('api/message_report', 'Api::message_report');
 $routes->post('api/registrations_get', 'Api::registrations_get');

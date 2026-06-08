@@ -41,6 +41,9 @@
                         <button type="button" onclick="LoadData();" class="btn btn-primary margin">
                             <i class="fa fa-search"></i> Show Report
                         </button>
+                        <button type="button" onclick="ExportData();" class="btn btn-success margin">
+                            <i class="fa fa-file-excel-o"></i> Export Excel
+                        </button>
                     </div>
                 </div>
 
@@ -54,14 +57,13 @@
                                 <th>Employee</th>
                                 <th>Project Name</th>
                                 <th>Task Name</th>
-                                <th>Start Time</th>
-                                <th>End Time</th>
-                                <th>Hours</th>
+                                <th>Time</th>
+                                <!-- <th>Hours</th> -->
                                 <th>Comment</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr><td colspan="9">Please select a <b>Project</b> (or Employee) and click <b>Show Report</b>. Date range is optional.</td></tr>
+                            <tr><td colspan="7">Please select a <b>Project</b> (or Employee) and click <b>Show Report</b>. Date range is optional.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -87,6 +89,22 @@ function document_ready() {
 }
 
 
+function ExportData() {
+    var emp  = $('#emp_u_id').val();
+    var proj = $('#p_id').val();
+    if (!emp && !proj) { alert('Please select an Employee or a Project.'); return; }
+    var rs = $('#rpt_start').val();
+    var re = $('#rpt_end').val();
+    var mode = (proj !== '') ? 'summary' : 'detail';
+    var url = "<?php echo base_url('api/export_employee_work'); ?>"
+        + "?emp_u_id=" + encodeURIComponent(emp)
+        + "&p_id=" + encodeURIComponent(proj)
+        + "&rpt_start=" + encodeURIComponent(rs)
+        + "&rpt_end=" + encodeURIComponent(re)
+        + "&mode=" + mode;
+    window.open(url, '_blank');
+}
+
 function LoadData() {
     var emp  = $('#emp_u_id').val();
     var proj = $('#p_id').val();
@@ -99,12 +117,12 @@ function LoadData() {
     var mode = isSummary ? 'summary' : 'detail';
 
     if (isSummary) {
-        $('#dataTable_head').html('<th>Sr.</th><th>Task Name</th><th>Employee</th><th>Date</th><th>Start Time</th><th>End Time</th><th>Hours</th><th>Comment</th>');
+        $('#dataTable_head').html('<th>Sr.</th><th>Task Name</th><th>Employee</th><th>Date</th><th>Time</th><!-- <th>Hours</th> --><th>Comment</th>');
     } else {
-        $('#dataTable_head').html('<th>Sr.</th><th>Date</th><th>Employee</th><th>Project Name</th><th>Task Name</th><th>Start Time</th><th>End Time</th><th>Hours</th><th>Comment</th>');
+        $('#dataTable_head').html('<th>Sr.</th><th>Date</th><th>Employee</th><th>Project Name</th><th>Task Name</th><th>Time</th><!-- <th>Hours</th> --><th>Comment</th>');
     }
 
-    var colCount = isSummary ? 8 : 9;
+    var colCount = isSummary ? 6 : 7;
     var targets  = [];
     for (var c = 0; c < colCount; c++) targets.push(c);
 
@@ -128,8 +146,7 @@ function LoadData() {
         pageLength: 10000,
         stripeClasses: ['r0', 'r1'],
         bSort: false,
-        dom: 'Blfrtip',
-        "buttons": true,
+        dom: 'lfrtip',
         "columnDefs": [{"targets": targets, "searchable": false, "orderable": false}],
         "oLanguage": {
             "sEmptyTable": "No work records found for the selected criteria.",

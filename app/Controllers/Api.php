@@ -4957,26 +4957,25 @@ class Api extends BaseController
                     $builder->orderBy('A.at_date', 'ASC');
                     $ew_records = $builder->get()->getResultArray();
 
-                    $ew_data  = [];
-                    $i        = 1;
-                    $ew_total = 0;
+                    $ew_data      = [];
+                    $i            = 1;
+                    $ew_raw_total = 0;
                     foreach ($ew_records as $rec) {
-                        $hrs = $this->convertHours($rec['work_hours'] ?? 0);
-                        $ew_total += $hrs;
+                        $raw           = (float)($rec['work_hours'] ?? 0);
+                        $ew_raw_total += $raw;
                         $ew_data[] = [
                             $i++,
                             $rec['t_title'] ?? 'Leave',
                             $rec['u_name'] ?? '',
                             convert_db2display($rec['at_date']),
-                            RevTime((int)($rec['min_start'] ?? 0)),
-                            RevTime((int)($rec['max_end'] ?? 0)),
-                            number_format($hrs, 2),
+                            RevTime((int)($rec['min_start'] ?? 0)) . ' - ' . RevTime((int)($rec['max_end'] ?? 0)),
+                            // number_format($this->convertHours($raw), 2), // Hours - hidden
                             $rec['comments'] ?? '',
                         ];
                     }
-                    if ($ew_total > 0) {
-                        $ew_data[] = ['', '', '', '', '', '<b>Total Hours:</b>', '<b>' . number_format($ew_total, 2) . '</b>', ''];
-                    }
+                    // if ($ew_raw_total > 0) {
+                    //     $ew_data[] = ['', '', '', '', '', '<b>Total Hours:</b>', '<b>' . number_format($this->convertHours($ew_raw_total), 2) . '</b>', ''];
+                    // }
                 } else {
                     // --- Detail mode: attendance records grouped by date + task + employee ---
                     $builder = $db->table('aa_attendance A');
@@ -4994,27 +4993,26 @@ class Api extends BaseController
                     $builder->orderBy('A.at_date', 'ASC');
                     $ew_records = $builder->get()->getResultArray();
 
-                    $ew_data  = [];
-                    $i        = 1;
-                    $ew_total = 0;
+                    $ew_data      = [];
+                    $i            = 1;
+                    $ew_raw_total = 0;
                     foreach ($ew_records as $rec) {
-                        $hrs = $this->convertHours($rec['work_hours'] ?? 0);
-                        $ew_total += $hrs;
+                        $raw           = (float)($rec['work_hours'] ?? 0);
+                        $ew_raw_total += $raw;
                         $ew_data[] = [
                             $i++,
                             convert_db2display($rec['at_date']),
                             $rec['u_name'] ?? '',
                             $rec['p_name'] ?? 'Leave',
                             $rec['t_title'] ?? 'Leave',
-                            RevTime((int)($rec['min_start'] ?? 0)),
-                            RevTime((int)($rec['max_end'] ?? 0)),
-                            number_format($hrs, 2),
+                            RevTime((int)($rec['min_start'] ?? 0)) . ' - ' . RevTime((int)($rec['max_end'] ?? 0)),
+                            // number_format($this->convertHours($raw), 2), // Hours - hidden
                             $rec['comments'] ?? '',
                         ];
                     }
-                    if ($ew_total > 0) {
-                        $ew_data[] = ['', '', '', '<b>Total Hours:</b>', '', '', '', '<b>' . number_format($ew_total, 2) . '</b>', ''];
-                    }
+                    // if ($ew_raw_total > 0) {
+                    //     $ew_data[] = ['', '', '', '<b>Total Hours:</b>', '', '', '', '<b>' . number_format($this->convertHours($ew_raw_total), 2) . '</b>', ''];
+                    // }
                 }
                 echo json_encode(['draw' => intval($draw), 'recordsTotal' => count($ew_data), 'recordsFiltered' => count($ew_data), 'data' => $ew_data]);
                 break;
@@ -5219,6 +5217,214 @@ class Api extends BaseController
         $h = intdiv($minutes, 60);
         $m = $minutes % 60;
         return sprintf('%d.%02d', $h, $m);
+    }
+
+    public function export_employee_work()
+    {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        $db            = \Config\Database::connect();
+        $admin_session = session()->get('admin_session');
+        if (!$admin_session) {
+            echo 'Unauthorized'; exit;
+        }
+
+        $request  = service('request');
+        $emp_u_id = $request->getGet('emp_u_id') ?? '';
+        $proj_id  = $request->getGet('p_id') ?? '';
+        $ew_start = convert_display2db($request->getGet('rpt_start') ?? '');
+        $ew_end   = convert_display2db($request->getGet('rpt_end') ?? '');
+        $ew_mode  = $request->getGet('mode') ?? 'detail';
+
+        if (!$emp_u_id && !$proj_id) {
+            echo 'Please select an Employee or a Project.'; exit;
+        }
+
+        // Get project info
+        $proj_name = $proj_number = '';
+        if ($proj_id) {
+            $proj        = $db->table('aa_projects')->select('p_name, p_number')->where('p_id', $proj_id)->get()->getRowArray();
+            $proj_name   = $proj['p_name']   ?? '';
+            $proj_number = $proj['p_number'] ?? '';
+        }
+
+        // Get employee name
+        $emp_name = '';
+        if ($emp_u_id) {
+            $emp      = $db->table('aa_users')->select('u_name')->where('u_id', $emp_u_id)->get()->getRowArray();
+            $emp_name = $emp['u_name'] ?? '';
+        }
+
+        // Company name
+        $co_row       = $db->table('aa_settings')->where('s_key', 'company_name')->get()->getRowArray();
+        $company_name = !empty($co_row['s_value']) ? $co_row['s_value'] : 'AASHIR ENGINEERING PVT.LTD';
+
+        // ── Fetch records ──────────────────────────────────────────────────
+        if ($ew_mode === 'summary' && $proj_id) {
+            // Summary: project selected → columns: Employee | Date | Start | End | Hours | Comment
+            $builder = $db->table('aa_attendance A');
+            $builder->select('T.t_title, U.u_name, A.at_date, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
+            $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
+            $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
+            $builder->where('A.at_p_id', $proj_id);
+            if ($emp_u_id) $builder->where('A.at_u_id', $emp_u_id);
+            if ($ew_start)  $builder->where('A.at_date >=', $ew_start);
+            if ($ew_end)    $builder->where('A.at_date <=', $ew_end);
+            $builder->groupBy('A.at_t_id, A.at_u_id, A.at_date');
+            $builder->orderBy('T.t_title', 'ASC');
+            $builder->orderBy('U.u_name', 'ASC');
+            $builder->orderBy('A.at_date', 'ASC');
+            $records = $builder->get()->getResultArray();
+
+            $headers = ['Employee', 'Date', 'Time', /* 'Hours', */ 'Comment'];
+            $cols    = ['user', 'date', 'time', /* 'hours', */ 'comment'];
+
+            $grouped = [];
+            foreach ($records as $rec) {
+                $task_key           = $rec['t_title'] ?? 'Unknown Task';
+                $grouped[$task_key][] = [
+                    'user'      => $rec['u_name'] ?? '',
+                    'date'      => convert_db2display($rec['at_date']),
+                    'time'      => RevTime((int)($rec['min_start'] ?? 0)) . ' - ' . RevTime((int)($rec['max_end'] ?? 0)),
+                    // 'start'     => RevTime((int)($rec['min_start'] ?? 0)), // hidden
+                    // 'end'       => RevTime((int)($rec['max_end'] ?? 0)),   // hidden
+                    'hours_raw' => (float)($rec['work_hours'] ?? 0),
+                    'comment'   => $rec['comments'] ?? '',
+                ];
+            }
+        } else {
+            // Detail: employee selected → columns: Date | Employee | Project | Start | End | Hours | Comment
+            $builder = $db->table('aa_attendance A');
+            $builder->select('A.at_date, U.u_name, P.p_name, T.t_title, MIN(A.at_start) as min_start, MAX(A.at_end) as max_end, SUM((A.at_end - A.at_start) / 60) as work_hours, GROUP_CONCAT(A.at_comment ORDER BY A.at_start SEPARATOR \'; \') as comments');
+            $builder->join('aa_users U', 'U.u_id = A.at_u_id', 'left');
+            $builder->join('aa_projects P', 'P.p_id = A.at_p_id', 'left');
+            $builder->join('aa_tasks T', 'T.t_id = A.at_t_id', 'left');
+            if ($emp_u_id) $builder->where('A.at_u_id', $emp_u_id);
+            if ($ew_start)  $builder->where('A.at_date >=', $ew_start);
+            if ($ew_end)    $builder->where('A.at_date <=', $ew_end);
+            if ($proj_id)   $builder->where('A.at_p_id', $proj_id);
+            $builder->groupBy('T.t_title, A.at_u_id, A.at_date, A.at_p_id, A.at_t_id');
+            $builder->orderBy('T.t_title', 'ASC');
+            $builder->orderBy('U.u_name', 'ASC');
+            $builder->orderBy('A.at_date', 'ASC');
+            $records = $builder->get()->getResultArray();
+
+            $headers = ['Date', 'Employee', 'Project', 'Time', /* 'Hours', */ 'Comment'];
+            $cols    = ['date', 'user', 'project', 'time', /* 'hours', */ 'comment'];
+
+            $grouped = [];
+            foreach ($records as $rec) {
+                $task_key           = $rec['t_title'] ?? 'Unknown Task';
+                $grouped[$task_key][] = [
+                    'date'      => convert_db2display($rec['at_date']),
+                    'user'      => $rec['u_name'] ?? '',
+                    'project'   => $rec['p_name'] ?? '',
+                    'time'      => RevTime((int)($rec['min_start'] ?? 0)) . ' - ' . RevTime((int)($rec['max_end'] ?? 0)),
+                    // 'start'     => RevTime((int)($rec['min_start'] ?? 0)), // hidden
+                    // 'end'       => RevTime((int)($rec['max_end'] ?? 0)),   // hidden
+                    'hours_raw' => (float)($rec['work_hours'] ?? 0),
+                    'comment'   => $rec['comments'] ?? '',
+                ];
+            }
+        }
+
+        $date_range = '';
+        if ($ew_start || $ew_end) {
+            $date_range = ($ew_start ? convert_db2display($ew_start) : '') . ' to ' . ($ew_end ? convert_db2display($ew_end) : '');
+        }
+
+        // ── Output ─────────────────────────────────────────────────────────
+        $filename  = 'Employee_Work_Report_' . date('Ymd_His') . '.xls';
+        header('Content-Type: application/vnd.ms-excel');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: max-age=0');
+
+        $col_count = count($headers);
+
+        echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
+        echo '<head><meta charset="UTF-8"></head><body>';
+        echo '<table border="1" cellspacing="0" cellpadding="4">';
+
+        // ── Report header ──────────────────────────────────────────────────
+        echo '<tr><td colspan="' . $col_count . '" style="font-size:14pt;font-weight:bold;text-align:center;background:#1F4E79;color:#FFFFFF;">'
+            . htmlspecialchars($company_name) . '</td></tr>';
+        echo '<tr><td colspan="' . $col_count . '" style="font-size:11pt;font-weight:bold;text-align:center;background:#FFFF00;color:#000000;">Employee Project Work Report</td></tr>';
+
+        // ── Project / Employee / Date filter info (grey background) ────────
+        if ($proj_number || $proj_name) {
+            echo '<tr><td colspan="' . $col_count . '" style="font-weight:bold;background:#D9D9D9;">PROJECT NO : ' . htmlspecialchars($proj_number) . '</td></tr>';
+            echo '<tr><td colspan="' . $col_count . '" style="font-weight:bold;background:#D9D9D9;">PROJECT NAME : ' . htmlspecialchars($proj_name) . '</td></tr>';
+        }
+        if ($emp_name) {
+            echo '<tr><td colspan="' . $col_count . '" style="font-weight:bold;background:#D9D9D9;">EMPLOYEE : ' . htmlspecialchars($emp_name) . '</td></tr>';
+        }
+        if ($date_range) {
+            echo '<tr><td colspan="' . $col_count . '" style="font-weight:bold;background:#D9D9D9;">DATE RANGE : ' . htmlspecialchars($date_range) . '</td></tr>';
+        }
+
+        // ── Column headers ─────────────────────────────────────────────────
+        echo '<tr>';
+        foreach ($headers as $h) {
+            echo '<th style="background:#BDD7EE;font-weight:bold;text-align:center;">' . htmlspecialchars($h) . '</th>';
+        }
+        echo '</tr>';
+
+        // ── Grouped data ───────────────────────────────────────────────────
+        $grand_raw_total = 0;
+        $row_bg          = ['#FFFFFF', '#F2F2F2'];
+
+        foreach ($grouped as $task_name => $task_rows) {
+            // Task heading row (blue background)
+            echo '<tr><td colspan="' . $col_count . '" style="font-weight:bold;background:#2E75B6;color:#FFFFFF;">'
+                . htmlspecialchars($task_name) . '</td></tr>';
+
+            $task_raw_total = 0;
+            $ri             = 0;
+            foreach ($task_rows as $row) {
+                $raw             = $row['hours_raw'];
+                $task_raw_total += $raw;
+                $bg              = $row_bg[$ri % 2];
+                echo '<tr style="background:' . $bg . ';">';
+                foreach ($cols as $c) {
+                    if ($c === 'hours') {
+                        $val = number_format($this->convertHours($raw), 2);
+                    } else {
+                        $val = $row[$c] ?? '';
+                    }
+                    $align = ($c === 'hours') ? 'center' : 'left';
+                    echo '<td style="text-align:' . $align . ';">' . htmlspecialchars($val) . '</td>';
+                }
+                echo '</tr>';
+                $ri++;
+            }
+
+            // Task subtotal row
+            $grand_raw_total += $task_raw_total;
+            echo '<tr>';
+            for ($c = 0; $c < $col_count - 2; $c++) {
+                echo '<td style="font-weight:bold;background:#D6E4F0;">' . ($c === 0 ? 'Task Total Hours :' : '&nbsp;') . '</td>';
+            }
+            echo '<td style="font-weight:bold;background:#D6E4F0;text-align:center;">' . number_format($this->convertHours($task_raw_total), 2) . '</td>';
+            echo '<td style="background:#D6E4F0;">&nbsp;</td>';
+            echo '</tr>';
+
+            // Blank separator row
+            echo '<tr><td colspan="' . $col_count . '" style="background:#FFFFFF;">&nbsp;</td></tr>';
+        }
+
+        // ── Grand total row ────────────────────────────────────────────────
+        echo '<tr>';
+        for ($c = 0; $c < $col_count - 2; $c++) {
+            echo '<td style="font-weight:bold;background:#1F4E79;color:#FFFFFF;">' . ($c === 0 ? 'Total Hours Worked :' : '&nbsp;') . '</td>';
+        }
+        echo '<td style="font-weight:bold;background:#1F4E79;color:#FFFFFF;text-align:center;">' . number_format($this->convertHours($grand_raw_total), 2) . '</td>';
+        echo '<td style="background:#1F4E79;">&nbsp;</td>';
+        echo '</tr>';
+
+        echo '</table></body></html>';
+        exit;
     }
 
     public function messages()
