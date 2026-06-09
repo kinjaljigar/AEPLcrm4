@@ -62,6 +62,17 @@ class Ticket extends BaseController
         $request = service('request');
         $db = \Config\Database::connect();
 
+        // Duplicate guard: reject if same user submitted same subject+category within last 60 seconds
+        $recent = $db->table('aa_tickets')
+            ->where('u_id', $this->admin_session['u_id'])
+            ->where('subject', $request->getPost('subject'))
+            ->where('category_id', $request->getPost('category_id'))
+            ->where('created_at >=', date('Y-m-d H:i:s', strtotime('-60 seconds')))
+            ->countAllResults();
+        if ($recent > 0) {
+            return redirect()->to('ticket/my');
+        }
+
         $ticket_data = [
             'ticket_number' => $this->genUniqueTickNum($db),
             'subject' => $request->getPost('subject'),

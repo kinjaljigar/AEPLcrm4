@@ -64,7 +64,7 @@ $categories = $view_data['categories'];
                     </div>
 
 
-                    <input type="submit" value="Save" class="btn btn-primary">
+                    <input type="submit" id="btn_submit" value="Save" class="btn btn-primary">
                 </form>
                 <form id="redirectForm" action="<?= base_url('ticket/my'); ?>" method="post">
                     <br /><button type="submit" class="btn btn-primary">Back</button>
@@ -80,6 +80,11 @@ $categories = $view_data['categories'];
 </div><!-- /.content-wrapper -->
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
+    $('form[action*="ticket/store"]').on('submit', function() {
+        var $btn = $('#btn_submit');
+        $btn.val('Saving...').prop('disabled', true);
+    });
+
     $('#parent_category').change(function() {
         var parent_id = $(this).val();
         $('#child_category').html('<option>Loading...</option>');
