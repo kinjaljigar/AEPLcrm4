@@ -13,6 +13,10 @@
         margin-bottom: 8px;
         border-left: 3px solid #4CAF50;
     }
+
+    .starred-row td {
+        background-color: #ffe082 !important;
+    }
 </style>
 <?php
 $users = $view_data['users'];
@@ -77,17 +81,19 @@ $users = $view_data['users'];
                     <div class="col-md-2">
                         <label>&nbsp;</label><br>
                         <button class="btn btn-primary" onclick="LoadData()">Search</button>
+                        &nbsp;<label style="font-weight:normal;margin:0 0 0 6px;vertical-align:middle;"><input type="checkbox" id="filter_starred" onchange="LoadData()"> <i class="fa fa-star" style="color:#f0ad4e;"></i> Star Marked</label>
                     </div>
                 </div>
                 <table id="datatable" class="table table-bordered table-hover" width="100%">
                     <thead>
                         <tr>
+                            <th width="30" style="text-align:center;" title="Star / Favourite"><i class="fa fa-star" style="color:#f0ad4e;"></i></th>
                             <th>Date</th>
                             <th>Project</th>
                             <th>Message</th>
                             <th>Discipline</th>
                             <th>Replies</th>
-                            <th width="140">Action</th>
+                            <th width="100">Action</th>
                         </tr>
                     </thead>
                     <tbody class="admin_list"></tbody>
@@ -299,9 +305,9 @@ $users = $view_data['users'];
         var logged_role = "<?php echo $view_data['admin_session']['u_type']; ?>";
         var canExport = (logged_role === 'Master Admin' || logged_role === 'Bim Head' || logged_role === 'MailCoordinator');
         var exportOpts = {
-            columns: [0, 1, 2, 3, 4],
+            columns: [1, 2, 3, 4, 5],
             orthogonal: 'filter'
-        }; // exclude col 5 (Action buttons); use raw data not display HTML
+        }; // exclude col 0 (star) and col 6 (Action buttons)
         var exportButtons = canExport ? [{
                 extend: 'excelHtml5',
                 title: 'Messages',
@@ -329,7 +335,8 @@ $users = $view_data['users'];
             act: "list",
             project_id: $("#search_project").val(),
             search_date: $("#search_date").val(),
-            search_discipline: $("#search_discipline").val()
+            search_discipline: $("#search_discipline").val(),
+            starred_only: $("#filter_starred").is(":checked") ? 1 : 0
         };
         if (hasLeaderFilter && $('#search_leader').length && $('#search_leader').val()) {
             ajaxData.leader_id = $('#search_leader').val();
@@ -344,16 +351,25 @@ $users = $view_data['users'];
            // scrollY: "400px", // vertical scroll height
             scrollX: true, // horizontal scroll
            // scrollCollapse: true, // collapse height if fewer rows
-            columnDefs: [{
-                    "targets": [0, 1, 2, 3, 4],
+            columnDefs: [
+                {
+                    "targets": [0, 1, 2, 3, 4, 5, 6],
                     "orderable": false
                 },
                 {
+                    // col 0: star column
                     "targets": 0,
+                    "width": "30px",
+                    "className": "text-center",
+                },
+                {
+                    // col 1: date
+                    "targets": 1,
                     "width": "70px",
                 },
                 {
-                    "targets": 1,
+                    // col 2: project
+                    "targets": 2,
                     "width": "170px",
                     "render": function(data, type, row) {
                         if (type === 'display' && data) {
@@ -364,29 +380,19 @@ $users = $view_data['users'];
                     }
                 },
                 {
-                    // "targets": 2,
-                    // "width": "320px",
-                    // "render": function(data, type, row) {
-                    //     if (type === 'display' && data) {
-                    //         var safe = String(data).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                    //         if (data.length > 70) {
-                    //             var short = data.substr(0, 70);
-                    //             return '<span style="white-space:normal;word-break:break-word;">' + short +
-                    //                 '<span data-toggle="tooltip" data-placement="top" data-container="body" title="' + safe + '" style="color:#337ab7;cursor:pointer;font-weight:600;"> ...more</span></span>';
-                    //         }
-                    //         return '<span style="white-space:normal;word-break:break-word;">' + data + '</span>';
-                    //     }
-                    //     return data || '';
-                    // }
-                }, {
-                    "targets": 3,
-                    "width": "30px",
-                }, {
+                    // col 4: discipline
                     "targets": 4,
                     "width": "30px",
-                }, {
+                },
+                {
+                    // col 5: replies
                     "targets": 5,
                     "width": "30px",
+                },
+                {
+                    // col 6: action
+                    "targets": 6,
+                    "width": "80px",
                 },
             ],
             "drawCallback": function() {
@@ -518,5 +524,39 @@ $users = $view_data['users'];
 
     function closeMessageModal() {
         $('#replyMessageModal').modal('hide');
+    }
+
+    function toggleStar(pm_id, btn) {
+        doAjax("api/projectmessages", "POST", { act: "star", pm_id: pm_id }, function(res) {
+            if (res && res.status === 'pass') {
+                var $btn = $(btn);
+                if (res.starred) {
+                    $btn.removeClass('btn-default').addClass('btn-warning').attr('title', 'Unstar');
+                    $btn.closest('tr').addClass('starred-row');
+                } else {
+                    $btn.removeClass('btn-warning').addClass('btn-default').attr('title', 'Star');
+                    $btn.closest('tr').removeClass('starred-row');
+                }
+                // If starred-only filter is active, reload so unstarred rows disappear
+                if ($("#filter_starred").is(":checked")) {
+                    LoadData();
+                }
+            }
+        });
+    }
+
+    function toggleStarModal(pm_id, btn) {
+        doAjax("api/projectmessages", "POST", { act: "star", pm_id: pm_id }, function(res) {
+            if (res && res.status === 'pass') {
+                var $btn = $(btn);
+                if (res.starred) {
+                    $btn.removeClass('btn-default').addClass('btn-warning').attr('title', 'Unstar').html('<i class="fa fa-star"></i> Starred');
+                } else {
+                    $btn.removeClass('btn-warning').addClass('btn-default').attr('title', 'Star').html('<i class="fa fa-star"></i> Star');
+                }
+                // Refresh list row color in background
+                if (typeof dataTable !== 'undefined' && dataTable != null) dataTable.ajax.reload(null, false);
+            }
+        });
     }
 </script>

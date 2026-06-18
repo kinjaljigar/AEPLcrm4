@@ -2978,10 +2978,12 @@ class Api extends BaseController
                 $search_date = $request->getPost('search_date');
                 $search_discipline = $request->getPost('search_discipline');
                 $leader_id = $request->getPost('leader_id');
+                $starred_only = $request->getPost('starred_only');
 
                 $builder = $db->table('aa_project_messages PM');
                 $builder->select('PM.*, P.p_name, P.p_number, U.u_name as creator_name,
-                    (SELECT COUNT(*) FROM aa_project_message_replies WHERE pmr_pm_id = PM.pm_id) as reply_count');
+                    (SELECT COUNT(*) FROM aa_project_message_replies WHERE pmr_pm_id = PM.pm_id) as reply_count,
+                    COALESCE((SELECT pmu_starred FROM aa_project_message_users WHERE pmu_pm_id = PM.pm_id AND pmu_u_id = ' . (int)$admin_session['u_id'] . '), 0) as is_starred');
                 $builder->join('aa_projects P', 'PM.pm_p_id = P.p_id', 'left');
                 $builder->join('aa_users U', 'PM.pm_created_by = U.u_id', 'left');
                 $builder->where('PM.pm_deleted', 0);
@@ -3045,6 +3047,10 @@ class Api extends BaseController
                 if (!empty($search_discipline)) {
                     $builder->where('PM.pm_descipline', $search_discipline);
                 }
+                if (!empty($starred_only)) {
+                    $uid_for_star = (int)$admin_session['u_id'];
+                    $builder->where('PM.pm_id IN (SELECT pmu_pm_id FROM aa_project_message_users WHERE pmu_u_id = ' . $uid_for_star . ' AND pmu_starred = 1)', null, false);
+                }
 
                 $totalRecords = $builder->countAllResults(false);
                 $builder->orderBy('PM.pm_datetime', 'DESC');
@@ -3063,18 +3069,23 @@ class Api extends BaseController
 
                 $data = [];
                 foreach ($messages as $msg) {
+                    $is_starred = !empty($msg['is_starred']);
                     $row = [];
+                    // col 0: star button (first column)
+                    $row[] = '<a href="javascript://" onclick="toggleStar(' . $msg['pm_id'] . ', this)" class="btn btn-xs ' . ($is_starred ? 'btn-warning' : 'btn-default') . '" title="' . ($is_starred ? 'Unstar' : 'Star') . '"><i class="fa fa-star"></i></a>';
+                    // col 1-5: data columns
                     $row[] = date('M d, Y', strtotime($msg['pm_datetime']));
                     $row[] = $msg['p_name'] ?? 'General';
                     $row[] = htmlspecialchars($msg['pm_text'] ?? '');
                     $row[] = $msg['pm_descipline'] ?? 'ALL';
                     $row[] = $msg['reply_count'] ?? 0;
-
+                    // col 6: actions (no star button here anymore)
                     $actions = '<a href="javascript://" onclick="showThreadModal(' . $msg['pm_id'] . ')" class="btn btn-info btn-xs"><i class="fa fa-comments"></i></a> ';
                     if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head']) || $msg['pm_created_by'] == $admin_session['u_id']) {
                         $actions .= '<a href="javascript://" onclick="deleteProjectMessage(' . $msg['pm_id'] . ')" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i></a>';
                     }
                     $row[] = $actions;
+                    $row['DT_RowClass'] = $is_starred ? 'starred-row' : '';
                     $data[] = $row;
                 }
 
@@ -3090,7 +3101,8 @@ class Api extends BaseController
                 $pm_id = $request->getPost('pm_id');
 
                 $msg = $db->table('aa_project_messages PM')
-                    ->select('PM.*, U.u_name as creator_name, P.p_name')
+                    ->select('PM.*, U.u_name as creator_name, P.p_name,
+                        COALESCE((SELECT pmu_starred FROM aa_project_message_users WHERE pmu_pm_id = PM.pm_id AND pmu_u_id = ' . (int)$admin_session['u_id'] . '), 0) as is_starred')
                     ->join('aa_users U', 'PM.pm_created_by = U.u_id', 'left')
                     ->join('aa_projects P', 'PM.pm_p_id = P.p_id', 'left')
                     ->where('PM.pm_id', $pm_id)
@@ -3109,12 +3121,18 @@ class Api extends BaseController
                     ->get()->getResultArray();
 
                 // Build HTML
+                $is_starred = !empty($msg['is_starred']);
+                $star_btn = '<a href="javascript://" onclick="toggleStarModal(' . $pm_id . ', this)" class="btn btn-xs ' . ($is_starred ? 'btn-warning' : 'btn-default') . '" title="' . ($is_starred ? 'Unstar' : 'Star') . '"><i class="fa fa-star"></i> ' . ($is_starred ? 'Starred' : 'Star') . '</a>';
                 $header = '<div class="main-msg">';
-                $header .= '<strong>' . htmlspecialchars($msg['creator_name'] ?? '') . '</strong>';
+                $header .= '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">';
+                $header .= '<div><strong>' . htmlspecialchars($msg['creator_name'] ?? '') . '</strong>';
                 $header .= ' <small class="text-muted">' . date('M d, Y h:i A', strtotime($msg['pm_datetime'])) . '</small>';
                 if ($msg['p_name']) {
                     $header .= ' <span class="label label-info">' . htmlspecialchars($msg['p_name']) . '</span>';
                 }
+                $header .= '</div>';
+                $header .= '<div>' . $star_btn . '</div>';
+                $header .= '</div>';
                 $header .= '<p>' . nl2br(htmlspecialchars($msg['pm_text'])) . '</p>';
                 $header .= '</div>';
 
@@ -3167,6 +3185,32 @@ class Api extends BaseController
                 }
 
                 echo json_encode(['status' => 'pass', 'message' => 'Reply saved.']);
+                break;
+
+            case 'star':
+                $pm_id = (int)$request->getPost('pm_id');
+                $starRow = $db->table('aa_project_message_users')
+                    ->where('pmu_pm_id', $pm_id)
+                    ->where('pmu_u_id', $admin_session['u_id'])
+                    ->get()->getRowArray();
+                if ($starRow) {
+                    $new_val = $starRow['pmu_starred'] ? 0 : 1;
+                    $db->table('aa_project_message_users')
+                        ->where('pmu_pm_id', $pm_id)
+                        ->where('pmu_u_id', $admin_session['u_id'])
+                        ->update(['pmu_starred' => $new_val]);
+                    echo json_encode(['status' => 'pass', 'starred' => (bool)$new_val]);
+                } else {
+                    // Creator or admin not in message_users — insert a row for starring
+                    $db->table('aa_project_message_users')->insert([
+                        'pmu_pm_id'    => $pm_id,
+                        'pmu_u_id'     => $admin_session['u_id'],
+                        'pmu_read'     => 1,
+                        'pmu_starred'  => 1,
+                        'pmu_added_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    echo json_encode(['status' => 'pass', 'starred' => true]);
+                }
                 break;
 
             case 'del':
