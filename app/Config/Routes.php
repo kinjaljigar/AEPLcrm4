@@ -179,6 +179,7 @@ $routes->post('ticket/add_message/(:num)', 'Ticket::add_message/$1');
 $routes->get('ticket/close/(:num)', 'Ticket::close/$1');
 $routes->get('ticket/delete/(:num)', 'Ticket::delete/$1');
 $routes->get('ticket/deleteassign/(:num)', 'Ticket::deleteassign/$1');
+$routes->get('ticket/export_assigned', 'Ticket::export_assigned');
 
 // POST routes for other modules
 $routes->post('conference', 'Conference::index');

@@ -1,7 +1,7 @@
 <?php
-$token = isset($view_data['token']) ? $view_data['token'] : '';
-$tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
-
+$token        = isset($view_data['token'])   ? $view_data['token']   : '';
+$tickets      = isset($view_data['tickets']) ? $view_data['tickets'] : [];
+$show_closed_cols = (isset($view_data['status']) && $view_data['status'] === 'closed');
 ?>
 
 <div class="content-wrapper">
@@ -54,6 +54,7 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
 
                             <button type="submit" class="btn btn-success">Search</button>
                             <a href="<?= site_url('ticket/assigned') ?>" class="btn btn-secondary"><i class="fa fa-refresh"></i></a>
+                            <a id="btn_export" href="#" class="btn btn-warning" style="margin-left:10px;"><i class="fa fa-file-excel-o"></i> Export with Conversations</a>
                         </form>
 
                     </div>
@@ -69,6 +70,10 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
                             <th>Desktop</th>
                             <th>Created By</th>
                             <th>Status</th>
+                            <?php if ($show_closed_cols): ?>
+                            <th>Closed Date</th>
+                            <th>Closed By</th>
+                            <?php endif; ?>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -82,7 +87,11 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
                                 <td><?= htmlspecialchars($ticket->category_name) ?></td>
                                 <td><?= $ticket->desktop_number ?></td>
                                 <td><?= $ticket->created_by_name ?></td>
-                                <td><?= htmlspecialchars($ticket->status) ?></td>
+                                <td><?= ucfirst(htmlspecialchars($ticket->status)) ?></td>
+                                <?php if ($show_closed_cols): ?>
+                                <td><?= !empty($ticket->closed_at) ? date('d M Y, h:i A', strtotime($ticket->closed_at)) : '' ?></td>
+                                <td><?= htmlspecialchars($ticket->closed_by_name ?? '') ?></td>
+                                <?php endif; ?>
                                 <td>
                                     <a href="<?= site_url('ticket/view/' . $ticket->id . '?from=assign') ?>" class="btn btn-primary btn-md"><i class="fa fa-eye"></i></a>
                                     <?php if ($ticket->status == 'open' || $ticket->status == 'pending'): ?>
@@ -119,8 +128,27 @@ $tickets = isset($view_data['tickets']) ? $view_data['tickets'] : [];
             },
             <?php if ($show_export): ?>
             "dom": 'Blfrtip',
-            "buttons": ['copy', 'excel', 'pdf', 'print'],
+            "buttons": [
+                <?php $exp_cols = $show_closed_cols ? '[0,1,2,3,4,5,6,7,8,9]' : '[0,1,2,3,4,5,6,7]'; ?>
+                { extend: 'copy',  exportOptions: { columns: <?= $exp_cols ?> } },
+                { extend: 'excel', exportOptions: { columns: <?= $exp_cols ?> } },
+                { extend: 'pdf',   exportOptions: { columns: <?= $exp_cols ?> } },
+                { extend: 'print', exportOptions: { columns: <?= $exp_cols ?> } },
+            ],
             <?php endif; ?>
+        });
+
+        // Wire up Export with Conversations button using current filter values
+        $('#btn_export').on('click', function(e) {
+            e.preventDefault();
+            var params = new URLSearchParams({
+                created_by:     $('input[name="created_by"]').val()     || '',
+                desktop_number: $('input[name="desktop_number"]').val() || '',
+                status:         $('select[name="status"]').val()        || '',
+                from_date:      $('input[name="from_date"]').val()      || '',
+                to_date:        $('input[name="to_date"]').val()        || '',
+            });
+            window.location.href = '<?= site_url('ticket/export_assigned') ?>?' + params.toString();
         });
     }
 </script>

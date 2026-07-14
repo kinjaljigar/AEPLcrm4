@@ -274,7 +274,11 @@ class Ticket extends BaseController
             return redirect()->to('ticket/view/' . $id . (!empty($from) ? '?from=' . $from : ''));
         }
 
-        $db->table('aa_tickets')->where('id', $id)->update(['status' => 'closed']);
+        $db->table('aa_tickets')->where('id', $id)->update([
+            'status'    => 'closed',
+            'closed_at' => date('Y-m-d H:i:s'),
+            'closed_by' => $logged_user_id,
+        ]);
         session()->setFlashdata('success', 'Ticket closed successfully.');
 
         // Desktop notification for ticket closure
@@ -430,9 +434,10 @@ class Ticket extends BaseController
         $tickets = [];
         if (!empty($cat_ids)) {
             $builder = $db->table('aa_tickets t');
-            $builder->select('t.*, tc.name as category_name, u.u_name as created_by_name');
+            $builder->select('t.*, tc.name as category_name, u.u_name as created_by_name, cu.u_name as closed_by_name');
             $builder->join('aa_ticket_categories tc', 't.category_id = tc.id', 'left');
             $builder->join('aa_users u', 't.u_id = u.u_id', 'left');
+            $builder->join('aa_users cu', 'cu.u_id = t.closed_by', 'left');
             $builder->whereIn('t.category_id', $cat_ids);
             if (!empty($created_by)) $builder->like('u.u_name', $created_by);
             if (!empty($desktop_number)) $builder->like('t.desktop_number', $desktop_number);
@@ -592,6 +597,128 @@ class Ticket extends BaseController
         $db->table('aa_ticket_categories')->where('id', $id)->delete();
 
         return redirect()->to('ticket-category');
+    }
+
+    public function export_assigned()
+    {
+        while (ob_get_level() > 0) { ob_end_clean(); }
+
+        $db            = \Config\Database::connect();
+        $admin_session = session()->get('admin_session');
+        if (!$admin_session) { echo 'Unauthorized'; exit; }
+
+        $request        = service('request');
+        $u_id           = $admin_session['u_id'];
+        $created_by     = $request->getGet('created_by')     ?? '';
+        $desktop_number = $request->getGet('desktop_number') ?? '';
+        $status         = $request->getGet('status')         ?? '';
+        $from_date      = $request->getGet('from_date')      ?? '';
+        $to_date        = $request->getGet('to_date')        ?? '';
+
+        // Get categories assigned to this user
+        $category_ids = $db->table('aa_ticket_category_users')
+            ->select('category_id')->where('u_id', $u_id)->get()->getResultArray();
+        $cat_ids = array_column($category_ids, 'category_id');
+
+        $tickets = [];
+        if (!empty($cat_ids)) {
+            $builder = $db->table('aa_tickets t');
+            $builder->select('t.*, tc.name as category_name, u.u_name as created_by_name, cu.u_name as closed_by_name');
+            $builder->join('aa_ticket_categories tc', 't.category_id = tc.id', 'left');
+            $builder->join('aa_users u', 't.u_id = u.u_id', 'left');
+            $builder->join('aa_users cu', 'cu.u_id = t.closed_by', 'left');
+            $builder->whereIn('t.category_id', $cat_ids);
+            if (!empty($created_by))     $builder->like('u.u_name', $created_by);
+            if (!empty($desktop_number)) $builder->like('t.desktop_number', $desktop_number);
+            if ($status !== '')          $builder->where('t.status', $status);
+            if (!empty($from_date))      $builder->where('t.created_at >=', $from_date . ' 00:00:00');
+            if (!empty($to_date))        $builder->where('t.created_at <=', $to_date . ' 23:59:59');
+            $builder->orderBy('t.created_at', 'DESC');
+            $tickets = $builder->get()->getResultArray();
+        }
+
+        $filename = 'Tickets_Export_' . date('Ymd_His') . '.xls';
+        header('Content-Type: application/vnd.ms-excel');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: max-age=0');
+
+        $cols = 9;
+        echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
+        echo '<head><meta charset="UTF-8"><style>
+            td,th{font-size:10pt;vertical-align:top;}
+            .th-blue{background:#1F4E79;color:#fff;font-weight:bold;text-align:center;}
+            .th-mid{background:#2E75B6;color:#fff;font-weight:bold;}
+            .th-hdr{background:#BDD7EE;font-weight:bold;text-align:center;}
+            .th-conv{background:#E2EFDA;font-weight:bold;}
+            .msg-row{background:#F9F9F9;}
+        </style></head><body>';
+        echo '<table border="1" cellspacing="0" cellpadding="4">';
+
+        // Report title
+        echo '<tr><td colspan="' . $cols . '" class="th-blue" style="font-size:13pt;">Assigned Tickets Report</td></tr>';
+
+        // Column header row
+        echo '<tr>';
+        foreach (['#', 'Date Created', 'Ticket No', 'Category', 'Desktop No', 'Created By', 'Status', 'Closed Date', 'Closed By'] as $h) {
+            echo '<th class="th-hdr">' . $h . '</th>';
+        }
+        echo '</tr>';
+
+        $sr = 1;
+        foreach ($tickets as $t) {
+            $is_closed = ($t['status'] === 'closed');
+
+            // Ticket data row
+            echo '<tr>';
+            echo '<td style="text-align:center;">' . $sr++ . '</td>';
+            echo '<td>' . date('d M Y, h:i A', strtotime($t['created_at'])) . '</td>';
+            echo '<td style="font-weight:bold;">' . htmlspecialchars($t['ticket_number']) . '</td>';
+            echo '<td>' . htmlspecialchars($t['category_name'] ?? '') . '</td>';
+            echo '<td>' . htmlspecialchars($t['desktop_number'] ?? '') . '</td>';
+            echo '<td>' . htmlspecialchars($t['created_by_name'] ?? '') . '</td>';
+            echo '<td style="text-align:center;">' . ucfirst($t['status']) . '</td>';
+            echo '<td>' . ($is_closed && !empty($t['closed_at']) ? date('d M Y, h:i A', strtotime($t['closed_at'])) : '') . '</td>';
+            echo '<td>' . htmlspecialchars($is_closed ? ($t['closed_by_name'] ?? '') : '') . '</td>';
+            echo '</tr>';
+
+            // Subject row
+            echo '<tr><td></td><td colspan="' . ($cols - 1) . '" style="font-weight:bold;background:#F2F2F2;">Subject: ' . htmlspecialchars($t['subject'] ?? '') . '</td></tr>';
+            if (!empty($t['description'])) {
+                echo '<tr><td></td><td colspan="' . ($cols - 1) . '" style="color:#444;">Description: ' . nl2br(htmlspecialchars($t['description'])) . '</td></tr>';
+            }
+
+            // Conversation messages
+            $messages = $db->table('aa_ticket_messages tm')
+                ->select('tm.message, tm.created_at, u.u_name as sender_name')
+                ->join('aa_users u', 'tm.sender_id = u.u_id', 'left')
+                ->where('tm.ticket_id', $t['id'])
+                ->orderBy('tm.created_at', 'ASC')
+                ->get()->getResultArray();
+
+            if (!empty($messages)) {
+                echo '<tr><td></td><td colspan="' . ($cols - 1) . '" class="th-conv">Conversation (' . count($messages) . ' message' . (count($messages) > 1 ? 's' : '') . ')</td></tr>';
+                foreach ($messages as $msg) {
+                    echo '<tr class="msg-row">';
+                    echo '<td></td>';
+                    echo '<td>' . date('d M Y, h:i A', strtotime($msg['created_at'])) . '</td>';
+                    echo '<td style="font-weight:bold;">' . htmlspecialchars($msg['sender_name'] ?? '') . '</td>';
+                    echo '<td colspan="' . ($cols - 3) . '">' . nl2br(htmlspecialchars($msg['message'] ?? '')) . '</td>';
+                    echo '</tr>';
+                }
+            } else {
+                echo '<tr><td></td><td colspan="' . ($cols - 1) . '" style="color:#999;font-style:italic;">No conversation yet.</td></tr>';
+            }
+
+            // Blank separator between tickets
+            echo '<tr><td colspan="' . $cols . '" style="background:#FFFFFF;border:none;">&nbsp;</td></tr>';
+        }
+
+        if (empty($tickets)) {
+            echo '<tr><td colspan="' . $cols . '" style="text-align:center;color:#999;">No tickets found.</td></tr>';
+        }
+
+        echo '</table></body></html>';
+        exit;
     }
 
     private function genUniqueTickNum($db)
