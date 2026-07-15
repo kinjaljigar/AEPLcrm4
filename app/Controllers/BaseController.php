@@ -152,12 +152,18 @@ abstract class BaseController extends Controller
                 // Load unread inbox messages (leave approvals, task alerts, etc.)
                 try {
                     $db = \Config\Database::connect();
+
+                    // Ensure leave reminder DB record exists for today (Project Leaders only).
+                    // Must run BEFORE the message query so the created record is included.
+                    $this->_checkLeaveReminders($db, intval($this->admin_session['u_id']), $this->admin_session['u_type'] ?? '');
+
                     $messages = $db->query("
                         SELECT M.me_id, M.me_text, M.me_p_id,
                                COALESCE(M.leave_message, 'No') AS leave_message,
                                COALESCE(M.conference_message, 'No') AS conference_message,
                                COALESCE(M.task_message, 'No') AS task_message,
                                COALESCE(M.birthday_message, 'No') AS birthday_message,
+                               COALESCE(M.leave_reminder, 'No') AS leave_reminder,
                                P.p_name
                         FROM aa_message M
                         LEFT JOIN aa_projects P ON P.p_id = M.me_p_id
@@ -166,6 +172,7 @@ abstract class BaseController extends Controller
                           AND (MU.mu_read IS NULL OR MU.mu_read = 0)
                         ORDER BY M.me_id DESC
                     ")->getResultArray();
+
                     $this->session->set('messages', $messages);
                 } catch (\Exception $e) {
                     $this->session->set('messages', []);
@@ -176,6 +183,108 @@ abstract class BaseController extends Controller
                 header('Location: ' . base_url('home/login'));
                 exit;
             }
+        }
+    }
+
+    /**
+     * Leave reminder for Project Leaders.
+     * Creates one real aa_message + aa_message_users record per leader per day
+     * when any of their employees have an approved leave starting within the next 3 days.
+     * Using real me_id ensures the standard dismiss (reset_me / mu_read=1) flow works correctly.
+     */
+    protected function _checkLeaveReminders($db, $u_id, $u_type)
+    {
+        try {
+            if ($u_type !== 'Project Leader') return;
+
+            $today          = date('Y-m-d');
+            $threeDaysLater = date('Y-m-d', strtotime('+3 days'));
+
+            // Cleanup: delete aa_message_users rows where the leader already dismissed the alert
+            $db->query(
+                "DELETE MU FROM aa_message_users MU
+                 INNER JOIN aa_message M ON M.me_id = MU.mu_me_id
+                 WHERE M.leave_reminder = 'Yes' AND MU.mu_u_id = {$u_id} AND MU.mu_read = 1"
+            );
+            // Cleanup: delete leave_reminder messages older than 7 days
+            $db->query(
+                "DELETE FROM aa_message
+                 WHERE leave_reminder = 'Yes'
+                 AND me_u_id = {$u_id}
+                 AND DATE(me_datetime) < DATE_SUB(NOW(), INTERVAL 7 DAY)"
+            );
+
+            // One message per leader per day — skip if already created today
+            $alreadySent = (int)($db->query(
+                "SELECT COUNT(*) as cnt FROM aa_message
+                 WHERE leave_reminder = 'Yes'
+                 AND me_u_id = {$u_id}
+                 AND DATE(me_datetime) = '{$today}'"
+            )->getRowArray()['cnt'] ?? 0);
+
+            if ($alreadySent > 0) return;
+
+            // Find employees under this leader with upcoming approved leaves
+            $upcomingLeaves = $db->query(
+                "SELECT U.u_name, L.l_from_date, L.l_to_date,
+                        L.l_is_halfday, L.l_halfday_time,
+                        L.l_is_hourly, L.l_hourly_time, L.l_message
+                 FROM aa_leaves L
+                 JOIN aa_users U ON U.u_id = L.l_u_id
+                 WHERE U.u_leader = {$u_id}
+                 AND L.l_status = 'Approved'
+                 AND L.l_from_date >= '{$today}'
+                 AND L.l_from_date <= '{$threeDaysLater}'
+                 ORDER BY L.l_from_date ASC, U.u_name ASC"
+            )->getResultArray();
+
+            if (empty($upcomingLeaves)) return;
+
+            // Build message text — one row per leave
+            $rows = [];
+            foreach ($upcomingLeaves as $lv) {
+                $from    = !empty($lv['l_from_date']) ? date('d M Y', strtotime($lv['l_from_date'])) : '';
+                $to      = !empty($lv['l_to_date'])   ? date('d M Y', strtotime($lv['l_to_date']))   : '';
+                $dateStr = ($from === $to || empty($to)) ? $from : $from . ' to ' . $to;
+
+                $type = '';
+                if (!empty($lv['l_is_halfday']) && $lv['l_is_halfday'] === 'Yes')
+                    $type = ' &mdash; Half Day' . (!empty($lv['l_halfday_time']) ? ' (' . htmlspecialchars($lv['l_halfday_time']) . ')' : '');
+                elseif (!empty($lv['l_is_hourly']) && $lv['l_is_hourly'] === 'Yes')
+                    $type = ' &mdash; ' . (!empty($lv['l_hourly_time']) ? htmlspecialchars($lv['l_hourly_time']) : 'Hourly');
+
+                $row = '<strong>' . htmlspecialchars($lv['u_name']) . '</strong> &mdash; ' . $dateStr . $type;
+                if (!empty($lv['l_message']))
+                    $row .= ' &mdash; <em>' . htmlspecialchars($lv['l_message']) . '</em>';
+                $rows[] = '<li>' . $row . '</li>';
+            }
+            $messageText = 'Upcoming leave' . (count($rows) > 1 ? 's' : '') . ' in the next 3 days:<ul style="margin:6px 0 0 0;padding-left:18px;">' . implode('', $rows) . '</ul>';
+
+            // Insert message record
+            $nextMeId = (int)($db->query("SELECT COALESCE(MAX(me_id), 0) + 1 AS next_id FROM aa_message")->getRowArray()['next_id'] ?? 1);
+            $db->table('aa_message')->insert([
+                'me_id'              => $nextMeId,
+                'me_u_id'            => $u_id,
+                'me_p_id'            => 0,
+                'me_text'            => $messageText,
+                'me_datetime'        => date('Y-m-d H:i:s'),
+                'leave_message'      => 'No',
+                'conference_message' => 'No',
+                'task_message'       => 'No',
+                'schedule_message'   => 'No',
+                'birthday_message'   => 'No',
+                'leave_reminder'     => 'Yes',
+            ]);
+
+            // Add to this project leader's inbox (mu_read=0 = unread/visible)
+            $db->table('aa_message_users')->insert([
+                'mu_me_id' => $nextMeId,
+                'mu_u_id'  => $u_id,
+                'mu_read'  => 0,
+            ]);
+
+        } catch (\Exception $e) {
+            log_message('error', 'Leave reminder check failed: ' . $e->getMessage());
         }
     }
 

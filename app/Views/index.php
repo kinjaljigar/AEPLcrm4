@@ -533,7 +533,6 @@
             </div>
             <?php if ($view_data['authorization']->is_role_allowed($view_data['admin_session']['u_type'], ['Project Leader'])) { ?>
 
-
                 <div class="box box-sbpink">
                     <div class="box-header">
                         <div class="row">

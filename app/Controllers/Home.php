@@ -187,6 +187,7 @@ class Home extends BaseController
             $this->view_data['todaysmessages'] = [];
         }
 
+
         $this->view_data['plugins'] = ['datatable' => true, 'form_validation' => true];
         return view('template', ['view_data' => $this->view_data]);
     }

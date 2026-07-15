@@ -585,6 +585,9 @@ class Api extends BaseController
             // Birthday notifications
             $this->_checkBirthdayNotifications($db, $u_id, $u_type);
 
+            // Leave reminders for Project Leaders
+            $this->_checkLeaveReminders($db, $u_id, $u_type);
+
             // Fetch unsent notifications for this user
             $notifications = $db->table('aa_desktop_notification_queue')
                 ->where('u_id', $u_id)
@@ -762,6 +765,95 @@ class Api extends BaseController
 
         } catch (\Exception $e) {
             log_message('error', 'Birthday message check failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Leave reminder for Project Leaders.
+     * Creates one message per leader per day if any of their employees
+     * have an approved leave starting within the next 3 days.
+     */
+    protected function _checkLeaveReminders($db, $u_id, $u_type)
+    {
+        try {
+            if ($u_type !== 'Project Leader') return;
+
+            $today          = date('Y-m-d');
+            $threeDaysLater = date('Y-m-d', strtotime('+3 days'));
+
+            // Cleanup: delete dismissed leave_reminder messages (mu_read=1)
+            $db->query(
+                "DELETE MU FROM aa_message_users MU
+                 INNER JOIN aa_message M ON M.me_id = MU.mu_me_id
+                 WHERE M.leave_reminder = 'Yes' AND MU.mu_u_id = {$u_id} AND MU.mu_read = 1"
+            );
+            // Cleanup: delete leave_reminder messages older than 7 days
+            $db->query(
+                "DELETE FROM aa_message
+                 WHERE leave_reminder = 'Yes'
+                 AND me_u_id = {$u_id}
+                 AND DATE(me_datetime) < DATE_SUB(NOW(), INTERVAL 7 DAY)"
+            );
+
+            // Already created today for this leader?
+            $alreadySent = $db->query(
+                "SELECT COUNT(*) as cnt FROM aa_message
+                 WHERE leave_reminder = 'Yes'
+                 AND me_u_id = {$u_id}
+                 AND DATE(me_datetime) = '{$today}'"
+            )->getRowArray()['cnt'] ?? 0;
+
+            if ($alreadySent > 0) return;
+
+            // Find employees under this leader with upcoming approved leaves
+            $upcomingLeaves = $db->query(
+                "SELECT U.u_name, L.l_from_date, L.l_to_date
+                 FROM aa_leaves L
+                 JOIN aa_users U ON U.u_id = L.l_u_id
+                 WHERE U.u_leader = {$u_id}
+                 AND L.l_status = 'Approved'
+                 AND L.l_from_date >= '{$today}'
+                 AND L.l_from_date <= '{$threeDaysLater}'
+                 ORDER BY L.l_from_date ASC"
+            )->getResultArray();
+
+            if (empty($upcomingLeaves)) return;
+
+            // Build message
+            $lines = [];
+            foreach ($upcomingLeaves as $lv) {
+                $from    = !empty($lv['l_from_date']) ? date('d M Y', strtotime($lv['l_from_date'])) : '';
+                $to      = !empty($lv['l_to_date'])   ? date('d M Y', strtotime($lv['l_to_date']))   : '';
+                $dateStr = ($from === $to || empty($to)) ? $from : $from . ' to ' . $to;
+                $lines[] = '<strong>' . htmlspecialchars($lv['u_name']) . '</strong> (' . $dateStr . ')';
+            }
+            $messageText = 'Upcoming leave' . (count($lines) > 1 ? 's' : '') . ' in the next 3 days: ' . implode(', ', $lines);
+
+            // Insert message
+            $nextMeId = (int)($db->query("SELECT COALESCE(MAX(me_id), 0) + 1 AS next_id FROM aa_message")->getRowArray()['next_id'] ?? 1);
+            $db->table('aa_message')->insert([
+                'me_id'              => $nextMeId,
+                'me_u_id'            => $u_id,
+                'me_p_id'            => 0,
+                'me_text'            => $messageText,
+                'me_datetime'        => date('Y-m-d H:i:s'),
+                'leave_message'      => 'No',
+                'conference_message' => 'No',
+                'task_message'       => 'No',
+                'schedule_message'   => 'No',
+                'birthday_message'   => 'No',
+                'leave_reminder'     => 'Yes',
+            ]);
+
+            // Add only to this project leader
+            $db->table('aa_message_users')->insert([
+                'mu_me_id' => $nextMeId,
+                'mu_u_id'  => $u_id,
+                'mu_read'  => 0,
+            ]);
+
+        } catch (\Exception $e) {
+            log_message('error', 'Leave reminder check failed: ' . $e->getMessage());
         }
     }
 
@@ -2420,6 +2512,8 @@ class Api extends BaseController
                     $leaveData['l_reply'] = '';
                     $db->table('aa_leaves')->where('l_id', $l_id)->update($leaveData);
                 } else {
+                    $nextLId = (int)($db->query("SELECT COALESCE(MAX(l_id), 0) + 1 AS next_id FROM aa_leaves")->getRowArray()['next_id'] ?? 1);
+                    $leaveData['l_id'] = $nextLId;
                     $leaveData['l_create_date'] = date('Y-m-d');
                     $leaveData['l_status'] = 'Pending';
                     $db->table('aa_leaves')->insert($leaveData);

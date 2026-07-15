@@ -412,6 +412,8 @@ if (isset($view_data['plugins'])) {
                     foreach ($session->get('messages') as $message) {
                         if (!empty($message['birthday_message']) && $message['birthday_message'] == 'Yes')
                             echo '<div class="alert alert-dismissible" style="background-color:#fffacd;border-color:#ffd700;color:#333;">';
+                        elseif (!empty($message['leave_reminder']) && $message['leave_reminder'] == 'Yes')
+                            echo '<div class="alert alert-dismissible" style="background-color:#fff0d0;border-color:#ff9800;border-left:5px solid #ff9800;color:#333;">';
                         elseif ($message['conference_message'] == 'Yes' || $message['task_message'] == 'Yes')
                             echo '<div class="alert alert-dismissible" style="background-color:#ebc634;">';
                         else
@@ -419,6 +421,8 @@ if (isset($view_data['plugins'])) {
                         echo '<button type="button" class="close reset_me" data-dismiss="alert" aria-hidden="true" data-id="' . $message['me_id'] . '">×</button>';
                         if (!empty($message['birthday_message']) && $message['birthday_message'] == 'Yes')
                             echo '<h4><i class="icon fa fa-birthday-cake"></i> Birthdays </h4>';
+                        elseif (!empty($message['leave_reminder']) && $message['leave_reminder'] == 'Yes')
+                            echo '<h4><i class="icon fa fa-calendar-times-o" style="color:#ff9800;"></i> Leave Reminder &mdash; Upcoming 3 Days </h4>';
                         elseif ($message['leave_message'] == 'No')
                             echo '<h4><i class="icon fa fa-envelope"></i> ' . $message['p_name'] . '</h4>';
                         else
