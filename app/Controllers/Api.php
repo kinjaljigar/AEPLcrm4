@@ -181,31 +181,37 @@ class Api extends BaseController
         $u_id = $admin_session['u_id'] ?? 0;
         $type = $request->getPost('type') ?? 'basic';
 
-        // For Project Leader, filter by assigned projects
+        // For Project Leader, filter by assigned projects (including predecessors)
         $isLeader = ($u_type == 'Project Leader');
+        $plCondition = '';
+        if ($isLeader) {
+            $predIds  = $this->_getPredecessorPLIds($db, $u_id);
+            $allPLIds = array_merge([(int)$u_id], $predIds);
+            $plCondition = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, p_leader)", $allPLIds)) . ')';
+        }
 
         switch ($type) {
             case 'basic':
                 // Get project counts
                 $pBuilder = $db->table('aa_projects');
-                if ($isLeader) $pBuilder->where("FIND_IN_SET($u_id, p_leader)", null, false);
+                if ($isLeader) $pBuilder->where($plCondition, null, false);
                 $total_projects = $pBuilder->countAllResults();
 
                 $pBuilder = $db->table('aa_projects')->where('p_status', 'Active');
-                if ($isLeader) $pBuilder->where("FIND_IN_SET($u_id, p_leader)", null, false);
+                if ($isLeader) $pBuilder->where($plCondition, null, false);
                 $active_projects = $pBuilder->countAllResults();
 
                 $pBuilder = $db->table('aa_projects')->where('p_status', 'Completed');
-                if ($isLeader) $pBuilder->where("FIND_IN_SET($u_id, p_leader)", null, false);
+                if ($isLeader) $pBuilder->where($plCondition, null, false);
                 $completed_projects = $pBuilder->countAllResults();
 
                 $pBuilder = $db->table('aa_projects')->where('p_status', 'Hold');
-                if ($isLeader) $pBuilder->where("FIND_IN_SET($u_id, p_leader)", null, false);
+                if ($isLeader) $pBuilder->where($plCondition, null, false);
                 $hold_projects = $pBuilder->countAllResults();
 
                 // Get task counts
                 if ($isLeader) {
-                    $leaderProjects = $db->table('aa_projects')->select('p_id')->where("FIND_IN_SET($u_id, p_leader)", null, false)->get()->getResultArray();
+                    $leaderProjects = $db->table('aa_projects')->select('p_id')->where($plCondition, null, false)->get()->getResultArray();
                     $projectIds = array_column($leaderProjects, 'p_id');
                     if (!empty($projectIds)) {
                         $total_tasks = $db->table('aa_tasks')->whereIn('t_p_id', $projectIds)->countAllResults();
@@ -1312,9 +1318,13 @@ class Api extends BaseController
                 }
                 $builder->where('P.p_status', 'Active');
 
-                // Project Leader / Employee: only show tasks assigned to them
+                // Project Leader / Employee: only show tasks assigned to them (or predecessor PLs)
                 if (in_array($admin_session['u_type'], ['Project Leader', 'Employee'])) {
-                    $builder->where('TU.tu_u_id', $admin_session['u_id']);
+                    $predIds = $admin_session['u_type'] === 'Project Leader'
+                        ? $this->_getPredecessorPLIds($db, $admin_session['u_id'])
+                        : [];
+                    $allUserIds = array_merge([(int)$admin_session['u_id']], $predIds);
+                    $builder->whereIn('TU.tu_u_id', $allUserIds);
                 }
 
                 if (!empty($txt_projects)) {
@@ -1819,6 +1829,7 @@ class Api extends BaseController
 
         $act = $request->getPost('act');
         $u_id = $request->getPost('u_id');
+        $original_post_uid = intval($u_id ?? 0); // 0 = new user, >0 = edit
 
         // Handle Add/Edit
         if ($act === 'add') {
@@ -1858,6 +1869,10 @@ class Api extends BaseController
                     $db->query("UPDATE aa_users SET u_birthdate = ? WHERE u_id = ?", [$birthdateRaw, $u_id]);
                 } else {
                     $db->query("UPDATE aa_users SET u_birthdate = NULL WHERE u_id = " . intval($u_id));
+                }
+                // Option B: if this user is being reactivated and was a replaced PL, clear the replacement link
+                if (($userData['u_status'] ?? '') === 'Active') {
+                    $db->query("UPDATE aa_users SET u_replaced_by = 0 WHERE u_id = ? AND u_replaced_by > 0", [(int)$u_id]);
                 }
             } else {
                 if (empty($password)) {
@@ -1899,6 +1914,33 @@ class Api extends BaseController
                     unlink($existingFile);
                 }
                 $photoFile->move($photoDir, 'ulogo_' . $u_id . '.jpg');
+            }
+
+            // Handle Project Leader replacement
+            $replace_pl_id = intval($request->getPost('replace_pl_id') ?? 0);
+            if (($userData['u_type'] ?? '') === 'Project Leader') {
+                // Find currently replaced PL for this user (if any)
+                $curReplacedRow       = $db->query("SELECT u_id FROM aa_users WHERE u_replaced_by = ? LIMIT 1", [(int)$u_id])->getRowArray();
+                $currently_replaced_id = $curReplacedRow ? (int)$curReplacedRow['u_id'] : 0;
+
+                if ($replace_pl_id > 0 && $replace_pl_id !== $currently_replaced_id) {
+                    // Clear old replaced PL link if switching to a different one
+                    if ($currently_replaced_id > 0) {
+                        $db->query("UPDATE aa_users SET u_replaced_by = 0 WHERE u_id = ?", [$currently_replaced_id]);
+                    }
+                    // Mark new old PL as replaced, deactivate them, transfer team & projects
+                    $db->query("UPDATE aa_users SET u_replaced_by = ?, u_status = 'Deactive' WHERE u_id = ?", [$u_id, $replace_pl_id]);
+                    $db->query("UPDATE aa_users SET u_leader = ? WHERE u_leader = ?", [$u_id, $replace_pl_id]);
+                    $projRows = $db->query("SELECT p_id, p_leader FROM aa_projects WHERE FIND_IN_SET(?, p_leader)", [$replace_pl_id])->getResultArray();
+                    foreach ($projRows as $proj) {
+                        $ids = array_map('intval', array_filter(explode(',', $proj['p_leader'])));
+                        $ids = array_map(fn($id) => $id === $replace_pl_id ? (int)$u_id : $id, $ids);
+                        $db->query("UPDATE aa_projects SET p_leader = ? WHERE p_id = ?", [implode(',', array_unique($ids)), $proj['p_id']]);
+                    }
+                } elseif ($replace_pl_id === 0 && $currently_replaced_id > 0) {
+                    // Replacement cleared — unlink and reactivate the old PL so they can be used again
+                    $db->query("UPDATE aa_users SET u_replaced_by = 0, u_status = 'Active' WHERE u_id = ?", [$currently_replaced_id]);
+                }
             }
 
             echo json_encode(['status' => 'pass', 'message' => 'Employee saved successfully.']);
@@ -1970,6 +2012,11 @@ class Api extends BaseController
                 } else {
                     $user['u_birthdate'] = '';
                 }
+                // Find which old PL (if any) this user has replaced
+                $replacedRow = $db->query("SELECT u_id, u_name FROM aa_users WHERE u_replaced_by = ? LIMIT 1", [(int)$u_id])->getRowArray();
+                $user['replaced_pl_id']   = $replacedRow ? (int)$replacedRow['u_id']  : 0;
+                $user['replaced_pl_name'] = $replacedRow ? $replacedRow['u_name']      : '';
+
                 echo json_encode([
                     'status' => 'pass',
                     'data' => $user
@@ -2147,9 +2194,12 @@ class Api extends BaseController
                             $builder->where('p_status', 'Active');
                         }
 
-                        // Filter by leader if user is Project Leader
+                        // Filter by leader if user is Project Leader (include predecessor PLs)
                         if (isset($admin_session['u_type']) && $admin_session['u_type'] == 'Project Leader') {
-                            $builder->like('p_leader', $admin_session['u_id']);
+                            $predIds  = $this->_getPredecessorPLIds($db, $admin_session['u_id']);
+                            $allPLIds = array_merge([(int)$admin_session['u_id']], $predIds);
+                            $cond = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, p_leader)", $allPLIds)) . ')';
+                            $builder->where($cond, null, false);
                         }
 
                         $builder->orderBy('p_name', 'ASC');
@@ -2177,11 +2227,14 @@ class Api extends BaseController
                             $builder->orderBy('p_name', 'ASC');
                             $projects = $builder->get()->getResultArray();
                         } elseif ($u_type === 'Project Leader') {
-                            // Project Leader: only projects where they are p_leader
+                            // Project Leader: projects where they (or predecessor PLs) are p_leader
+                            $predIds  = $this->_getPredecessorPLIds($db, $u_id);
+                            $allPLIds = array_merge([(int)$u_id], $predIds);
+                            $cond = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, p_leader)", $allPLIds)) . ')';
                             $projects = $db->table('aa_projects')
                                 ->select('p_id, p_name, p_number')
                                 ->where('p_status', 'Active')
-                                ->like('p_leader', $u_id)
+                                ->where($cond, null, false)
                                 ->orderBy('p_name', 'ASC')
                                 ->get()->getResultArray();
                         } else {
@@ -3085,20 +3138,24 @@ class Api extends BaseController
                 // Role-based filtering
                 $u_type = $admin_session['u_type'];
                 if ($u_type === 'Project Leader') {
-                    // Project Leader: only messages they created or were sent to, AND only from their assigned projects
+                    // Project Leader: messages created by them/predecessors OR sent to them/predecessors,
+                    // AND from their assigned projects (current + predecessor PLs)
+                    $predIds  = $this->_getPredecessorPLIds($db, $admin_session['u_id']);
+                    $allPLIds = array_merge([(int)$admin_session['u_id']], $predIds);
+
+                    // Project filter: projects where any of allPLIds is p_leader
+                    $plCond   = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, p_leader)", $allPLIds)) . ')';
                     $plProjects = $db->table('aa_projects')
                         ->select('p_id')
-                        ->like('p_leader', $admin_session['u_id'])
+                        ->where($plCond, null, false)
                         ->get()->getResultArray();
                     $plProjectIds = array_column($plProjects, 'p_id');
 
+                    // Creator/recipient filter: created by OR sent to any of allPLIds
+                    $idList = implode(',', $allPLIds);
                     $builder->groupStart()
-                        ->where('PM.pm_created_by', $admin_session['u_id'])
-                        ->orWhereIn('PM.pm_id', function($subquery) use ($admin_session) {
-                            return $subquery->select('pmu_pm_id')
-                                ->from('aa_project_message_users')
-                                ->where('pmu_u_id', $admin_session['u_id']);
-                        })
+                        ->whereIn('PM.pm_created_by', $allPLIds)
+                        ->orWhere("PM.pm_id IN (SELECT pmu_pm_id FROM aa_project_message_users WHERE pmu_u_id IN ({$idList}))", null, false)
                         ->groupEnd();
 
                     if (!empty($plProjectIds)) {
@@ -3676,7 +3733,9 @@ class Api extends BaseController
 
                 // Filter by user role
                 if (!in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
-                    $builder->where('W.leader_id', $u_id);
+                    $predIds      = $this->_getPredecessorPLIds($db, $u_id);
+                    $allLeaderIds = array_merge([(int)$u_id], $predIds);
+                    $builder->whereIn('W.leader_id', $allLeaderIds);
                 }
 
                 if (!empty($project_id)) {
@@ -4051,20 +4110,26 @@ class Api extends BaseController
                 $builder->join('aa_projects P', 'W.p_id = P.p_id', 'left');
                 $builder->join('aa_users CU', 'WD.created_by = CU.u_id', 'left');
 
-                // Project Leader filter: only show dependencies from their assigned projects
+                // Project Leader filter: only show dependencies from their assigned projects (including predecessors)
                 if ($u_type === 'Project Leader') {
-                    $builder->like('P.p_leader', $u_id);
+                    $predIds  = $this->_getPredecessorPLIds($db, $u_id);
+                    $allPLIds = array_merge([(int)$u_id], $predIds);
+                    $pCond    = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, P.p_leader)", $allPLIds)) . ')';
+                    $builder->where($pCond, null, false);
+
+                    // dep_leader_ids condition covers new PL + all predecessors
+                    $depIdConds = implode(' OR ', array_map(fn($id) => "FIND_IN_SET('" . (int)$id . "', WD.dep_leader_ids) > 0", $allPLIds));
 
                     // Sub-filter for Project Leader
                     if ($createdby === 'own') {
-                        $builder->where('WD.created_by', $u_id);
+                        $builder->whereIn('WD.created_by', $allPLIds);
                     } elseif ($createdby === 'assigned') {
-                        $builder->where('WD.created_by !=', $u_id);
-                        $builder->where("FIND_IN_SET('" . (int)$u_id . "', WD.dep_leader_ids) > 0");
+                        $builder->whereNotIn('WD.created_by', $allPLIds);
+                        $builder->where("({$depIdConds})");
                     } elseif ($createdby === 'myall' || empty($createdby)) {
                         $builder->groupStart()
-                            ->where('WD.created_by', $u_id)
-                            ->orWhere("FIND_IN_SET('" . (int)$u_id . "', WD.dep_leader_ids) > 0")
+                            ->whereIn('WD.created_by', $allPLIds)
+                            ->orWhere("({$depIdConds})")
                         ->groupEnd();
                     }
                     // 'all' = no additional filter within assigned projects
@@ -5258,7 +5323,15 @@ class Api extends BaseController
                 if ($from_date && $to_date) {
                     $fd = date('Y-m-d', strtotime($from_date));
                     $td = date('Y-m-d', strtotime($to_date));
-                    $sql .= " AND w.week_from <= '{$td}' AND w.week_to >= '{$fd}'";
+                    if (in_array($filter_status, ['PAUSE', 'HOLD'])) {
+                        // When filtering specifically for PAUSE/HOLD, skip date filter - show all
+                    } elseif (empty($filter_status) || $filter_status === 'All') {
+                        // Show date-range rows AND always include PAUSE/HOLD regardless of date
+                        $sql .= " AND (w.week_from <= '{$td}' AND w.week_to >= '{$fd}' OR w.status IN ('PAUSE','HOLD'))";
+                    } else {
+                        // WIP / COMPLETED: apply date filter strictly
+                        $sql .= " AND w.week_from <= '{$td}' AND w.week_to >= '{$fd}'";
+                    }
                 }
                 if (!empty($filter_status) && $filter_status != 'All') $sql .= " AND w.status = '" . $db->escapeString($filter_status) . "'";
                 $sql .= " ORDER BY u.u_name ASC";

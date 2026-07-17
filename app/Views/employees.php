@@ -207,13 +207,22 @@
             <div class="col-lg-4 col-md-6 col-sm-12">
                 <div class="form-group">
                     <label for="u_qualification">Employee Type </label>
-                    <select class="form-control" name="u_type" id="u_type">
+                    <select class="form-control" name="u_type" id="u_type" onchange="onUTypeChange(this)">
                         <option value="Bim Head">Bim Head</option>
                         <option value="Project Leader">Project Leader</option>
                         <option value="Employee">Employee</option>
                         <option value="TaskCoordinator">TaskCoordinator</option>
                         <option value="MailCoordinator">MailCoordinator</option>
                     </select>
+                </div>
+            </div>
+            <div class="col-lg-4 col-md-6 col-sm-12" id="replace_pl_row" style="display:none;">
+                <div class="form-group">
+                    <label>Replace Existing Project Leader <small class="text-muted">(optional)</small></label>
+                    <select class="form-control" name="replace_pl_id" id="replace_pl_id">
+                        <option value="">-- Do Not Replace --</option>
+                    </select>
+                    <span class="explain-tip">Selected old PL will be deactivated and their team will be transferred to this new PL.</span>
                 </div>
             </div>
             <div class="col-lg-4 col-md-6 col-sm-12">
@@ -239,21 +248,33 @@
     var STYPE = '';
     var dataTable = null;
 
+    var plOptions = ''; // cached PL list for replace dropdown
+
     function document_ready() {
         LoadData();
         doAjax('api/drop_get', 'POST', {
-            dropobjs: [{
-                'type': 'team_leader'
-            }]
+            dropobjs: [{'type': 'team_leader'}]
         }, function(res) {
             if (res.status == 'pass') {
                 var record = res.data;
                 $("#u_leader").html('<option value="">Please select Leader</option>' + record.team_leader);
+                plOptions = record.team_leader;
             } else {
                 showModal('ok', res.message, 'Error!', 'modal-danger', 'modal-sm');
             }
         });
+    }
 
+    function onUTypeChange(sel) {
+        var $form = $(sel).closest('form, .admin_add_modal');
+        var $row  = $form.find('#replace_pl_row');
+        if ($(sel).val() === 'Project Leader') {
+            $form.find('#replace_pl_id').html('<option value="">-- Do Not Replace --</option>' + plOptions);
+            $row.show();
+        } else {
+            $row.hide();
+            $form.find('#replace_pl_id').val('');
+        }
     }
 
     function LoadData() {
@@ -332,6 +353,17 @@
                         }
                         $('#admin_add_form #u_password').val(''); // always clear password on edit
                         $('#admin_add_form .edit_only').show();
+                        // Trigger Replace PL dropdown visibility based on current u_type
+                        onUTypeChange($('#admin_add_form #u_type')[0]);
+                        // Pre-select the old PL this user replaced (if any)
+                        if (record.replaced_pl_id) {
+                            var $rpl = $('#admin_add_form #replace_pl_id');
+                            // Replaced PL may be Deactive (not in active PL list) — add as option if missing
+                            if ($rpl.find('option[value="' + record.replaced_pl_id + '"]').length === 0) {
+                                $rpl.append('<option value="' + record.replaced_pl_id + '">' + record.replaced_pl_name + ' (Replaced)</option>');
+                            }
+                            $rpl.val(record.replaced_pl_id);
+                        }
                     });
                 } else {
                     showModal('ok', res.message, 'Error!', 'modal-danger', 'modal-sm');

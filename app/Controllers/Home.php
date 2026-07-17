@@ -103,9 +103,14 @@ class Home extends BaseController
                     {$createdByJoin}
                     WHERE WD.status != 'Completed'";
 
-            // For Project Leaders, only show their own or assigned to them
+            // For Project Leaders, only show their own or assigned to them (including predecessor PLs)
             if ($u_type == 'Project Leader') {
-                $depSql .= " AND (WW.leader_id = " . intval($u_id) . " OR FIND_IN_SET(" . intval($u_id) . ", WD.dep_leader_ids))";
+                $db = \Config\Database::connect();
+                $predIds  = $this->_getPredecessorPLIds($db, $u_id);
+                $allPLIds = array_merge([(int)$u_id], $predIds);
+                $idList   = implode(',', $allPLIds);
+                $depConds = implode(' OR ', array_map(fn($id) => "FIND_IN_SET(" . (int)$id . ", WD.dep_leader_ids)", $allPLIds));
+                $depSql .= " AND (WW.leader_id IN ({$idList}) OR ({$depConds}))";
             }
 
             $depSql .= " ORDER BY
@@ -172,8 +177,11 @@ class Home extends BaseController
                     })
                     ->groupEnd();
 
-                // ✅ ADD THIS CONDITION (IMPORTANT)
-                $msgBuilder->where("FIND_IN_SET($u_id, P.p_leader) >", 0, false);
+                // Filter to only projects where this PL (or predecessors) is p_leader
+                $predIds  = $this->_getPredecessorPLIds($db, $u_id);
+                $allPLIds = array_merge([(int)$u_id], $predIds);
+                $plCond   = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, P.p_leader) > 0", $allPLIds)) . ')';
+                $msgBuilder->where($plCond, null, false);
             }
 
             $messages = $msgBuilder->get()->getResultArray();
@@ -386,8 +394,23 @@ class Home extends BaseController
             $users = $userModel->getActiveEmployees();
             $this->view_data['users'] = $users;
         } else {
-            $u_id = $this->admin_session['u_id'];
-            $projects = $projectModel->getProjectsByUser($u_id);
+            $u_id   = $this->admin_session['u_id'];
+            $u_type = $this->admin_session['u_type'];
+            $db = \Config\Database::connect();
+            if ($u_type === 'Project Leader') {
+                // Include predecessor PL projects as well as task-assigned projects
+                $predIds    = $this->_getPredecessorPLIds($db, $u_id);
+                $allPLIds   = array_merge([(int)$u_id], $predIds);
+                $plConds    = implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, P.p_leader)", $allPLIds));
+                $allIdsList = implode(',', $allPLIds);
+                $projects = $db->query("SELECT DISTINCT P.p_id, P.p_name, P.p_number FROM aa_projects P
+                    LEFT JOIN aa_task2user TU ON P.p_id = TU.tu_p_id AND TU.tu_removed = 'No'
+                    WHERE (P.p_status = 'Active' OR P.p_status = 'New')
+                      AND ({$plConds} OR TU.tu_u_id IN ({$allIdsList}))
+                    ORDER BY P.p_name ASC")->getResultArray();
+            } else {
+                $projects = $projectModel->getProjectsByUser($u_id);
+            }
         }
 
         $this->view_data['projects'] = $projects;
@@ -745,10 +768,12 @@ class Home extends BaseController
         if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator', 'MailCoordinator'])) {
             $projects = $db->table('aa_projects')->where('p_status', 'Active')->orderBy('p_name', 'ASC')->get()->getResultArray();
         } elseif ($u_type === 'Project Leader') {
-            // Project Leader: only show projects where they are p_leader
+            $predIds  = $this->_getPredecessorPLIds($db, $u_id);
+            $allPLIds = array_merge([(int)$u_id], $predIds);
+            $plCond   = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, p_leader)", $allPLIds)) . ')';
             $projects = $db->table('aa_projects')
                 ->where('p_status', 'Active')
-                ->like('p_leader', $u_id)
+                ->where($plCond, null, false)
                 ->orderBy('p_name', 'ASC')
                 ->get()->getResultArray();
         } else {
@@ -801,11 +826,13 @@ class Home extends BaseController
         if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head', 'TaskCoordinator'])) {
             $projects = $db->table('aa_projects')->select('p_id, p_name, p_number')->where('p_status', 'Active')->get()->getResultArray();
         } elseif ($u_type === 'Project Leader') {
-            // Project Leader: only projects where they are p_leader
+            $predIds  = $this->_getPredecessorPLIds($db, $u_id);
+            $allPLIds = array_merge([(int)$u_id], $predIds);
+            $plCond   = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, p_leader)", $allPLIds)) . ')';
             $projects = $db->table('aa_projects')
                 ->select('p_id, p_name, p_number')
                 ->where('p_status', 'Active')
-                ->like('p_leader', $u_id)
+                ->where($plCond, null, false)
                 ->orderBy('p_name', 'ASC')
                 ->get()->getResultArray();
         } else {
@@ -908,10 +935,13 @@ class Home extends BaseController
         if (in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
             $projects = $db->table('aa_projects')->select('p_id, p_number, p_name')->get()->getResultArray();
         } else {
-            // Get projects where user is leader or assigned to tasks
+            // Get projects where user is leader (or predecessor PL) or assigned to tasks
+            $predIds  = $u_type === 'Project Leader' ? $this->_getPredecessorPLIds($db, $u_id) : [];
+            $allPLIds = array_merge([(int)$u_id], $predIds);
+            $plConds  = implode(' OR ', array_map(fn($id) => "P.p_leader LIKE '%{$id}%'", $allPLIds));
             $projects = $db->query("SELECT DISTINCT P.p_id, P.p_number, P.p_name FROM aa_projects P
                 LEFT JOIN aa_task2user TU ON P.p_id = TU.tu_p_id AND TU.tu_removed = 'No'
-                WHERE P.p_status = 'Active' AND (P.p_leader LIKE '%{$u_id}%' OR TU.tu_u_id = '{$u_id}')
+                WHERE P.p_status = 'Active' AND ({$plConds} OR TU.tu_u_id = '{$u_id}')
                 ORDER BY P.p_name ASC")->getResultArray();
         }
 
@@ -1088,8 +1118,20 @@ class Home extends BaseController
             $users = $userModel->where('u_status', 'Active')->findAll();
             $this->view_data['users'] = $users;
         } else {
-            $u_id = $this->admin_session['u_id'];
-            $projects = $db->query("SELECT DISTINCT(p_id), P.p_name, P.p_number, u_id FROM aa_users U LEFT OUTER JOIN aa_task2user TU ON U.u_id = TU.tu_u_id LEFT OUTER JOIN aa_projects P ON TU.tu_p_id = P.p_id WHERE TU.tu_removed = 'No' AND (P.p_status = 'Active' OR P.p_status = 'New') AND u_id = '{$u_id}'")->getResultArray();
+            $u_id   = $this->admin_session['u_id'];
+            $u_type = $this->admin_session['u_type'];
+            if ($u_type === 'Project Leader') {
+                $predIds  = $this->_getPredecessorPLIds($db, $u_id);
+                $allPLIds = array_merge([(int)$u_id], $predIds);
+                $plConds  = implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, P.p_leader)", $allPLIds));
+                $projects = $db->query("SELECT DISTINCT P.p_id, P.p_name, P.p_number FROM aa_projects P
+                    LEFT JOIN aa_task2user TU ON P.p_id = TU.tu_p_id AND TU.tu_removed = 'No'
+                    WHERE (P.p_status = 'Active' OR P.p_status = 'New')
+                      AND ({$plConds} OR TU.tu_u_id = '{$u_id}')
+                    ORDER BY P.p_name ASC")->getResultArray();
+            } else {
+                $projects = $db->query("SELECT DISTINCT(p_id), P.p_name, P.p_number, u_id FROM aa_users U LEFT OUTER JOIN aa_task2user TU ON U.u_id = TU.tu_u_id LEFT OUTER JOIN aa_projects P ON TU.tu_p_id = P.p_id WHERE TU.tu_removed = 'No' AND (P.p_status = 'Active' OR P.p_status = 'New') AND u_id = '{$u_id}'")->getResultArray();
+            }
         }
         $this->view_data['projects'] = $projects;
 

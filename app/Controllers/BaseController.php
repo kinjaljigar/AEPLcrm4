@@ -192,6 +192,26 @@ abstract class BaseController extends Controller
      * when any of their employees have an approved leave starting within the next 3 days.
      * Using real me_id ensures the standard dismiss (reset_me / mu_read=1) flow works correctly.
      */
+    /**
+     * Returns array of u_ids of all predecessor Project Leaders for the given PL.
+     * When PL-A is replaced by PL-B, PL-A.u_replaced_by = PL-B.u_id.
+     * This walks the chain recursively so PL-C (who replaced PL-B) also sees PL-A's data.
+     */
+    protected function _getPredecessorPLIds($db, $u_id)
+    {
+        $allIds  = [];
+        $toCheck = [(int)$u_id];
+        while (!empty($toCheck)) {
+            $escaped = implode(',', array_map('intval', $toCheck));
+            $rows    = $db->query("SELECT u_id FROM aa_users WHERE u_replaced_by IN ({$escaped})")->getResultArray();
+            if (empty($rows)) break;
+            $found   = array_map('intval', array_column($rows, 'u_id'));
+            $allIds  = array_merge($allIds, $found);
+            $toCheck = $found;
+        }
+        return $allIds;
+    }
+
     protected function _checkLeaveReminders($db, $u_id, $u_type)
     {
         try {

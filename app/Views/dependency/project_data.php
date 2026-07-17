@@ -4,9 +4,11 @@ $monday = date('Y-m-d', strtotime('monday this week'));
 $friday = date('Y-m-d', strtotime('friday this week'));
 ?>
 <style>
-    .inactive-option {
-        color: red;
-    }
+    .inactive-option { color: red; }
+    /* PAUSE rows — orange tint */
+    tr.row-pause  td { background-color: #fff3cd !important; }
+    /* HOLD rows — red/pink tint */
+    tr.row-hold   td { background-color: #ffe0e0 !important; }
 </style>
 <div class="content-wrapper">
     <!-- Page Header -->
@@ -53,6 +55,10 @@ $friday = date('Y-m-d', strtotime('friday this week'));
                         <input type="date" id="to_date" value="<?php print $friday; ?>" class="form-control inline" style="width:150px;">
                         <button type="button" class="btn btn-primary" onclick="LoadData()">Search</button>
                         <button type="button" class="btn btn-default" onclick="ResetFilters()">Reset</button>
+                        &nbsp;&nbsp;
+                        <span style="display:inline-block;background:#fff3cd;border:1px solid #f0ad4e;padding:3px 10px;border-radius:3px;font-size:12px;">&#9632; PAUSE</span>
+                        &nbsp;
+                        <span style="display:inline-block;background:#ffe0e0;border:1px solid #d9534f;padding:3px 10px;border-radius:3px;font-size:12px;">&#9632; HOLD</span>
                     </div>
                 </div>
             </div>
@@ -265,11 +271,29 @@ $friday = date('Y-m-d', strtotime('friday this week'));
                 }
             ],
             //"searching": true,
+            createdRow: function(row, data, dataIndex) {
+                var status = data[9] || '';
+                if (status === 'PAUSE') $(row).addClass('row-pause');
+                else if (status === 'HOLD') $(row).addClass('row-hold');
+            },
             "columnDefs": [
                 {
                     "targets": [0, 1, 2, 4, 5, 6, 7, 8, 9, 10],
                     "searchable": false,
                     "orderable": false
+                },
+                {
+                    "targets": 9,
+                    "render": function(data, type, row) {
+                        if (type !== 'display') return data;
+                        var map = {
+                            'PAUSE':     '<span class="label" style="background:#f0ad4e;color:#fff;">PAUSE</span>',
+                            'HOLD':      '<span class="label" style="background:#d9534f;color:#fff;">HOLD</span>',
+                            'WIP':       '<span class="label" style="background:#337ab7;color:#fff;">WIP</span>',
+                            'COMPLETED': '<span class="label" style="background:#5cb85c;color:#fff;">COMPLETED</span>'
+                        };
+                        return map[data] || data;
+                    }
                 },
                 {
                     "targets": 6,
