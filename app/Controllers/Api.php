@@ -303,7 +303,7 @@ class Api extends BaseController
                 foreach ($leaves as $leave) {
                     $row = [];
                     $row[] = $leave['u_name'] ?? '';
-                    $row[] = !empty($leave['l_create_date']) ? convert_db2display($leave['l_create_date'], false) : '';
+                    $row[] = !empty($leave['l_create_date']) ? convert_db2display($leave['l_create_date']) : '';
                     $row[] = !empty($leave['l_from_date']) ? convert_db2display($leave['l_from_date'], false) : '';
                     $row[] = !empty($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '';
 
@@ -2507,9 +2507,17 @@ class Api extends BaseController
                 if ($l_id > 0) {
                     // Fetch existing leave BEFORE updating to check if dates changed on an approved leave
                     $existingLeave = $db->table('aa_leaves')
-                        ->select('l_from_date, l_to_date, l_approved_by, l_approved_by_id, l_reply, l_u_id')
+                        ->select('l_from_date, l_to_date, l_approved_by, l_approved_by_id, l_reply, l_u_id, l_status')
                         ->where('l_id', $l_id)
                         ->get()->getRowArray();
+
+                    // Block edit for Employee/PL if leave is already Approved or Declined
+                    if ($existingLeave && in_array($admin_session['u_type'] ?? '', ['Employee', 'Project Leader'])) {
+                        if (in_array($existingLeave['l_status'] ?? '', ['Approved', 'Declined'])) {
+                            echo json_encode(['status' => 'fail', 'message' => 'Cannot edit a leave that has already been ' . $existingLeave['l_status'] . '.']);
+                            exit;
+                        }
+                    }
 
                     // If leave was already approved and dates are changing → notify all Bim Heads (CI3 parity)
                     if ($existingLeave && !empty($existingLeave['l_approved_by']) && !empty($existingLeave['l_reply'])) {
@@ -2567,7 +2575,7 @@ class Api extends BaseController
                 } else {
                     $nextLId = (int)($db->query("SELECT COALESCE(MAX(l_id), 0) + 1 AS next_id FROM aa_leaves")->getRowArray()['next_id'] ?? 1);
                     $leaveData['l_id'] = $nextLId;
-                    $leaveData['l_create_date'] = date('Y-m-d');
+                    $leaveData['l_create_date'] = date('Y-m-d H:i:s');
                     $leaveData['l_status'] = 'Pending';
                     $db->table('aa_leaves')->insert($leaveData);
                 }
@@ -2831,7 +2839,7 @@ class Api extends BaseController
         foreach ($leaves as $leave) {
             $row = [];
             $row[] = $leave['employee_name'] ?? '';
-            $row[] = isset($leave['l_create_date']) ? convert_db2display($leave['l_create_date'], false) : '';
+            $row[] = isset($leave['l_create_date']) ? convert_db2display($leave['l_create_date']) : '';
             $row[] = isset($leave['l_from_date']) ? convert_db2display($leave['l_from_date'], false) : '';
             $row[] = isset($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '';
             $row[] = $leave['l_message'] ?? '';
@@ -2861,12 +2869,10 @@ class Api extends BaseController
             $isAdmin = in_array($admin_session['u_type'] ?? '', ['Master Admin', 'Super Admin', 'Bim Head']);
             $isLeader = (($admin_session['u_type'] ?? '') === 'Project Leader');
 
-            // Creator can edit and delete (delete only if still Pending)
-            if ($isCreator) {
+            // Creator can edit and delete only while still Pending
+            if ($isCreator && $isPending) {
                 $actions .= '<a href="javascript://" onclick="showAddEditForm(' . $leave['l_id'] . ')" class="btn btn-primary btn-xs" title="Edit"><i class="fa fa-edit"></i></a> ';
-                if ($isPending) {
-                    $actions .= '<a href="javascript://" onclick="deleteRecord(' . $leave['l_id'] . ')" class="btn btn-danger btn-xs" title="Delete"><i class="fa fa-trash"></i></a> ';
-                }
+                $actions .= '<a href="javascript://" onclick="deleteRecord(' . $leave['l_id'] . ')" class="btn btn-danger btn-xs" title="Delete"><i class="fa fa-trash"></i></a> ';
             }
 
             // Approve/Decline only when Pending
