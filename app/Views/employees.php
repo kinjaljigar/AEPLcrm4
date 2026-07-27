@@ -457,6 +457,19 @@
         }
     }
 
+    function toggleAPL(uid, newVal) {
+        var msg = newVal == 1 ? 'Set this employee as Assistant Project Leader?' : 'Remove APL role from this employee?';
+        showModal('confirm', msg, 'Confirm', 'modal-default', 'modal-sm', function() {
+            doAjax('api/employees', 'POST', { act: 'set_apl', target_uid: uid, is_apl: newVal }, function(res) {
+                if (res.status == 'pass') {
+                    showModal('ok', res.message, 'Success', 'modal-success', 'modal-sm', function(){}, function(){ dataTable.ajax.reload(); });
+                } else {
+                    showModal('ok', res.message, 'Error', 'modal-danger', 'modal-sm');
+                }
+            });
+        });
+    }
+
     function deleteRecord(id) {
         showModal('confirm', 'Are you sure , you want to delete this <b>Employee</b>?', 'Confirm', 'modal-default',
             'modal-sm',

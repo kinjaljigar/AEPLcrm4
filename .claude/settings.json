@@ -1,7 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./mysql/bin/mysql.exe -u root -e \":*)"
+      "Bash(./mysql/bin/mysql.exe -u root -e \":*)",
+      "Bash(./mysql/bin/mysql.exe -u root -e \"SHOW CREATE TABLE aa_weekly_work_status_history\\\\G\" AEPLcrm4)",
+      "Bash(./mysql/bin/mysql.exe -u root -e \"SHOW DATABASES;\")",
+      "Bash(./mysql/bin/mysql.exe -u root -e \"SHOW CREATE TABLE aa_weekly_work_status_history\\\\G\" crm)",
+      "Bash(./mysql/bin/mysql.exe -u root -e \"SHOW TABLES LIKE ''aa_weekly%'';\" crm)",
+      "Bash(./mysql/bin/mysql.exe -u root -e \"SHOW TABLES LIKE ''aa_weekly%'';\" aashir)",
+      "Bash(./mysql/bin/mysql.exe -u root -e \"SHOW CREATE TABLE aa_weekly_work_status_history\\\\G\" aashir)",
+      "Bash(./mysql/bin/mysql.exe -u root -e \"SHOW CREATE TABLE aa_weekly_work\\\\G\" aashir)",
+      "Bash(./mysql/bin/mysql.exe -u root -e \"ALTER TABLE aa_weekly_work MODIFY w_id INT\\(11\\) NOT NULL AUTO_INCREMENT;\" aashir)",
+      "Bash(./mysql/bin/mysql.exe -u root aashir 2)",
+      "Bash(1:*)",
+      "Bash(./mysql/bin/mysql.exe -u root aashir -e \":*)"
     ]
   }
 }

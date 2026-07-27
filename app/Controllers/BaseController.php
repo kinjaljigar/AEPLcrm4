@@ -212,6 +212,31 @@ abstract class BaseController extends Controller
         return $allIds;
     }
 
+    /**
+     * Find the Project Leader ID for an APL employee.
+     * Checks u_leader first (most reliable), falls back to project-based detection.
+     */
+    protected function _getAplPlId($db, int $emp_uid): int
+    {
+        // Primary: u_leader set by admin
+        $row = $db->table('aa_users')->select('u_leader')->where('u_id', $emp_uid)->get()->getRowArray();
+        if ($row && intval($row['u_leader']) > 0) {
+            return intval($row['u_leader']);
+        }
+        // Fallback: find PL from project assignments
+        $proj = $db->query("
+            SELECT p.p_leader FROM aa_task2user tu
+            INNER JOIN aa_projects p ON p.p_id = tu.tu_p_id
+            WHERE tu.tu_u_id = ? AND tu.tu_removed = 'No'
+              AND p.p_leader != '' AND p.p_leader != '0'
+            LIMIT 1
+        ", [$emp_uid])->getRowArray();
+        if ($proj && !empty($proj['p_leader'])) {
+            return (int)explode(',', $proj['p_leader'])[0];
+        }
+        return 0;
+    }
+
     protected function _checkLeaveReminders($db, $u_id, $u_type)
     {
         try {

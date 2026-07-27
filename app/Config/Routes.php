@@ -59,6 +59,7 @@ $routes->post('home/task/add/(:num)/(:num)', 'Home::taskAdd/$1/$2');
 
 // Other core routes
 $routes->get('home/tasks', 'Home::tasks');
+$routes->get('home/myteam', 'Home::myteam');
 $routes->get('home/projects', 'Home::projects');
 $routes->get('home/employees', 'Home::employees');
 $routes->get('home/messages', 'Home::messages');

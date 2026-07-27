@@ -379,6 +379,32 @@ class Home extends BaseController
         return redirect()->to(base_url('home/login'));
     }
 
+    public function myteam()
+    {
+        $u_type = $this->admin_session['u_type'] ?? '';
+        if ($u_type !== 'Project Leader') {
+            return redirect()->to(base_url('home/index'));
+        }
+        $db   = \Config\Database::connect();
+        $u_id = (int)$this->admin_session['u_id'];
+
+        // Team = employees formally assigned to this PL via u_leader
+        $team = $db->table('aa_users')
+            ->select('u_id, u_name, u_username, u_email, u_mobile, u_department, u_status, COALESCE(u_is_apl, 0) AS u_is_apl')
+            ->where('u_leader', $u_id)
+            ->where('u_status', 'Active')
+            ->orderBy('u_name', 'ASC')
+            ->get()->getResultArray();
+
+        $this->view_data['team']          = $team;
+        $this->view_data['page']          = 'myteam';
+        $this->view_data['meta_title']    = 'My Team';
+        $this->view_data['admin_session'] = $this->admin_session;
+        $this->view_data['authorization'] = $this->authorization;
+        $this->view_data['plugins']       = [];
+        return view('template', ['view_data' => $this->view_data]);
+    }
+
     public function tasks()
     {
         $projectModel = new ProjectModel();

@@ -207,6 +207,12 @@ if (isset($view_data['plugins'])) {
                             } else if ($authorization->is_role_allowed($u_type, ['MailCoordinator'])) {
                                 //$menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');
                                 $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
+                            } else if ($u_type === 'Employee' && !empty($view_data['admin_session']['u_is_apl'])) {
+                                // Assistant Project Leader — view-only Mail Links access
+                                $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
+                                $menu['leave_request'] = array('Leave Request', 'home/leaves', 'fa-briefcase');
+                                $menu['timesheet'] = array('Timesheet', 'home/timesheet', 'fa-briefcase');
+                                $menu['holidays'] = array('Holiday', 'home/holidays', 'fa-plane');
                             } else {
                                 if ($u_type != 'Associate User') {
                                     if ($u_type == 'Master Admin' || $u_type == 'Super Admin' || $u_type == 'Bim Head') {
@@ -220,6 +226,7 @@ if (isset($view_data['plugins'])) {
                                         $menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');
                                         //$menu['projects'] = array('Projects', 'home/projects', 'fa-sitemap');
                                         $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
+                                        $menu['myteam']   = array('My Team', 'home/myteam', 'fa-users');
                                     }
 
                                     $menu['tasks'] = array('Tasks', 'home/tasks', 'fa-tasks');

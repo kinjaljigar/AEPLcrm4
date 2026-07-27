@@ -60,13 +60,15 @@ class Api extends BaseController
                 $userModel->updateLoginStatus($user['u_id'], 1);
                     // Set session data - include all user fields
                     $admin_session = [
-                        'u_id' => $user['u_id'],
-                        'u_name' => $user['u_name'],
+                        'u_id'       => $user['u_id'],
+                        'u_name'     => $user['u_name'],
                         'u_username' => $user['u_username'],
-                        'u_type' => $user['u_type'],
-                        'u_email' => $user['u_email'],
-                        'u_mobile' => $user['u_mobile'],
-                        'u_app_auth' => $user['u_app_auth'] ?? '0'
+                        'u_type'     => $user['u_type'],
+                        'u_email'    => $user['u_email'],
+                        'u_mobile'   => $user['u_mobile'],
+                        'u_app_auth' => $user['u_app_auth'] ?? '0',
+                        'u_is_apl'   => intval($user['u_is_apl'] ?? 0),
+                        'u_leader'   => intval($user['u_leader'] ?? 0),
                     ];
 
                     $session->set('admin_session', $admin_session);
@@ -1862,8 +1864,19 @@ class Api extends BaseController
             }
 
             if ($u_id > 0) {
+                // Fetch existing record before update to detect PL change
+                $existingUser = $db->table('aa_users')->select('u_leader, u_is_apl')->where('u_id', $u_id)->get()->getRowArray();
+                $oldLeader    = intval($existingUser['u_leader'] ?? 0);
+                $newLeader    = intval($userData['u_leader'] ?? 0);
+
                 $userData['updated_at'] = date('Y-m-d H:i:s');
                 $db->table('aa_users')->where('u_id', $u_id)->update($userData);
+
+                // If PL changed, clear APL status so old PL no longer grants them access
+                if ($oldLeader !== $newLeader && intval($existingUser['u_is_apl'] ?? 0) === 1) {
+                    $db->table('aa_users')->where('u_id', $u_id)->update(['u_is_apl' => 0]);
+                }
+
                 // Update birthdate separately via raw query
                 if ($birthdateRaw !== null) {
                     $db->query("UPDATE aa_users SET u_birthdate = ? WHERE u_id = ?", [$birthdateRaw, $u_id]);
@@ -1926,10 +1939,14 @@ class Api extends BaseController
                 if ($replace_pl_id > 0 && $replace_pl_id !== $currently_replaced_id) {
                     // Clear old replaced PL link if switching to a different one
                     if ($currently_replaced_id > 0) {
-                        $db->query("UPDATE aa_users SET u_replaced_by = 0 WHERE u_id = ?", [$currently_replaced_id]);
+                        $db->query("UPDATE aa_users SET u_replaced_by = 0, u_transferred_employees = NULL WHERE u_id = ?", [$currently_replaced_id]);
                     }
-                    // Mark new old PL as replaced, deactivate them, transfer team & projects
-                    $db->query("UPDATE aa_users SET u_replaced_by = ?, u_status = 'Deactive' WHERE u_id = ?", [$u_id, $replace_pl_id]);
+                    // Capture which employees are being transferred (so we can restore them if reverting)
+                    $transferredRows = $db->query("SELECT u_id FROM aa_users WHERE u_leader = ?", [$replace_pl_id])->getResultArray();
+                    $transferredIds  = array_column($transferredRows, 'u_id');
+                    // Mark old PL as replaced, deactivate, store transferred employee list, transfer team & projects
+                    $db->query("UPDATE aa_users SET u_replaced_by = ?, u_status = 'Deactive', u_transferred_employees = ? WHERE u_id = ?",
+                        [$u_id, json_encode($transferredIds), $replace_pl_id]);
                     $db->query("UPDATE aa_users SET u_leader = ? WHERE u_leader = ?", [$u_id, $replace_pl_id]);
                     $projRows = $db->query("SELECT p_id, p_leader FROM aa_projects WHERE FIND_IN_SET(?, p_leader)", [$replace_pl_id])->getResultArray();
                     foreach ($projRows as $proj) {
@@ -1938,8 +1955,17 @@ class Api extends BaseController
                         $db->query("UPDATE aa_projects SET p_leader = ? WHERE p_id = ?", [implode(',', array_unique($ids)), $proj['p_id']]);
                     }
                 } elseif ($replace_pl_id === 0 && $currently_replaced_id > 0) {
-                    // Replacement cleared — unlink and reactivate the old PL so they can be used again
-                    $db->query("UPDATE aa_users SET u_replaced_by = 0, u_status = 'Active' WHERE u_id = ?", [$currently_replaced_id]);
+                    // Replacement cleared — restore OLD PL's original team members and reactivate them
+                    $oldPLRow = $db->query("SELECT u_transferred_employees FROM aa_users WHERE u_id = ?", [$currently_replaced_id])->getRowArray();
+                    $transferredIds = json_decode($oldPLRow['u_transferred_employees'] ?? '[]', true) ?: [];
+                    if (!empty($transferredIds)) {
+                        // Only restore employees who are still under the NEW PL (not moved elsewhere)
+                        $db->query(
+                            "UPDATE aa_users SET u_leader = ? WHERE u_id IN (" . implode(',', array_map('intval', $transferredIds)) . ") AND u_leader = ?",
+                            [$currently_replaced_id, $u_id]
+                        );
+                    }
+                    $db->query("UPDATE aa_users SET u_replaced_by = 0, u_status = 'Active', u_transferred_employees = NULL WHERE u_id = ?", [$currently_replaced_id]);
                 }
             }
 
@@ -1955,6 +1981,26 @@ class Api extends BaseController
             } else {
                 echo json_encode(['status' => 'fail', 'message' => 'Invalid employee.']);
             }
+            exit;
+        }
+
+        // Handle APL toggle
+        if ($act === 'set_apl') {
+            $target_uid = intval($request->getPost('target_uid'));
+            $is_apl     = intval($request->getPost('is_apl'));
+            if ($admin_session['u_type'] !== 'Project Leader') {
+                echo json_encode(['status' => 'fail', 'message' => 'Only Project Leaders can assign APL.']);
+                exit;
+            }
+            // Verify target employee belongs to this PL via u_leader
+            $plId  = intval($admin_session['u_id']);
+            $emp   = $db->table('aa_users')->select('u_id, u_leader')->where('u_id', $target_uid)->get()->getRowArray();
+            if (!$emp || intval($emp['u_leader']) !== $plId) {
+                echo json_encode(['status' => 'fail', 'message' => 'This employee is not assigned to your team. Ask admin to assign them via Employees page.']);
+                exit;
+            }
+            $db->table('aa_users')->where('u_id', $target_uid)->update(['u_is_apl' => $is_apl]);
+            echo json_encode(['status' => 'pass', 'message' => $is_apl ? 'Employee set as Assistant Project Leader.' : 'APL role removed.']);
             exit;
         }
 
@@ -2085,6 +2131,14 @@ class Api extends BaseController
             if ($admin_session['u_type'] == 'Master Admin' || $admin_session['u_type'] == 'Bim Head' || $admin_session['u_type'] == 'Super Admin') {
                 $actions .= '<a href="javascript://" onclick="deleteRecord(' . $employee['u_id'] . ')" class="btn btn-danger btn-xs"><i class="fa fa-trash"></i></a>';
             }
+            // APL toggle — only PL can set for their own team members
+            if ($admin_session['u_type'] === 'Project Leader' && intval($employee['u_leader']) === intval($admin_session['u_id'])) {
+                $isApl    = intval($employee['u_is_apl'] ?? 0);
+                $aplLabel = $isApl ? 'Remove APL' : 'Set APL';
+                $aplClass = $isApl ? 'btn-warning' : 'btn-success';
+                $aplNew   = $isApl ? 0 : 1;
+                $actions .= ' <a href="javascript://" onclick="toggleAPL(' . $employee['u_id'] . ', ' . $aplNew . ')" class="btn ' . $aplClass . ' btn-xs">' . $aplLabel . '</a>';
+            }
             $actions .= '</div>';
 
             $row[] = $actions;
@@ -2200,6 +2254,17 @@ class Api extends BaseController
                             $allPLIds = array_merge([(int)$admin_session['u_id']], $predIds);
                             $cond = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, p_leader)", $allPLIds)) . ')';
                             $builder->where($cond, null, false);
+                        } elseif (isset($admin_session['u_type']) && $admin_session['u_type'] == 'Employee' && !empty($admin_session['u_is_apl'])) {
+                            // APL: show only their PL's projects
+                            $aplPlId = $this->_getAplPlId($db, (int)$admin_session['u_id']);
+                            if ($aplPlId > 0) {
+                                $predIds  = $this->_getPredecessorPLIds($db, $aplPlId);
+                                $allPLIds = array_merge([$aplPlId], $predIds);
+                                $cond = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, p_leader)", $allPLIds)) . ')';
+                                $builder->where($cond, null, false);
+                            } else {
+                                $builder->where('p_id', 0); // no PL found, show nothing
+                            }
                         }
 
                         $builder->orderBy('p_name', 'ASC');
@@ -3143,7 +3208,35 @@ class Api extends BaseController
 
                 // Role-based filtering
                 $u_type = $admin_session['u_type'];
-                if ($u_type === 'Project Leader') {
+                $is_apl = intval($admin_session['u_is_apl'] ?? 0) === 1;
+
+                // APL: treat as their PL for message visibility
+                if ($u_type === 'Employee' && $is_apl) {
+                    $apl_pl_id = $this->_getAplPlId($db, (int)$admin_session['u_id']);
+                } else {
+                    $apl_pl_id = 0;
+                }
+                if ($u_type === 'Employee' && $is_apl && $apl_pl_id > 0) {
+                    $pl_id    = $apl_pl_id;
+                    $predIds  = $this->_getPredecessorPLIds($db, $pl_id);
+                    $allPLIds = array_merge([$pl_id], $predIds);
+
+                    $plCond     = '(' . implode(' OR ', array_map(fn($id) => "FIND_IN_SET($id, p_leader)", $allPLIds)) . ')';
+                    $plProjects = $db->table('aa_projects')->select('p_id')->where($plCond, null, false)->get()->getResultArray();
+                    $plProjectIds = array_column($plProjects, 'p_id');
+
+                    $idList = implode(',', $allPLIds);
+                    $builder->groupStart()
+                        ->whereIn('PM.pm_created_by', $allPLIds)
+                        ->orWhere("PM.pm_id IN (SELECT pmu_pm_id FROM aa_project_message_users WHERE pmu_u_id IN ({$idList}))", null, false)
+                        ->groupEnd();
+
+                    if (!empty($plProjectIds)) {
+                        $builder->whereIn('PM.pm_p_id', $plProjectIds);
+                    } else {
+                        $builder->where('PM.pm_id', 0);
+                    }
+                } elseif ($u_type === 'Project Leader') {
                     // Project Leader: messages created by them/predecessors OR sent to them/predecessors,
                     // AND from their assigned projects (current + predecessor PLs)
                     $predIds  = $this->_getPredecessorPLIds($db, $admin_session['u_id']);
@@ -3765,6 +3858,27 @@ class Api extends BaseController
                 }
                 $records = $builder->get()->getResultArray();
 
+                // Batch-fetch status history for all records on this page
+                $wIds = array_column($records, 'w_id');
+                $historyMap = [];
+                if (!empty($wIds)) {
+                    $historyRows = $db->table('aa_weekly_work_status_history')
+                        ->whereIn('w_id', $wIds)
+                        ->orderBy('changed_date', 'ASC')
+                        ->get()->getResultArray();
+                    foreach ($historyRows as $hr) {
+                        $historyMap[(int)$hr['w_id']][] = $hr;
+                    }
+                }
+
+                $statusLabelClass = function($s) {
+                    if ($s === 'WIP')       return 'label-warning';
+                    if ($s === 'COMPLETED') return 'label-success';
+                    if ($s === 'HOLD')      return 'label-danger';
+                    if ($s === 'PAUSE')     return 'label-info';
+                    return 'label-default';
+                };
+
                 $data = [];
                 foreach ($records as $rec) {
                     $row = [];
@@ -3776,9 +3890,40 @@ class Api extends BaseController
                     $row[] = $rec['p_name'] ?? '';
                     // Task
                     $row[] = $rec['task_name'] ?? '';
-                    // Submission Date
+                    // Submission Date + status history
                     $sd = $rec['submission_date'] ?? '';
-                    $row[] = (!empty($sd) && $sd !== '0000-00-00') ? $sd : '';
+                    $sdDisplay = (!empty($sd) && $sd !== '0000-00-00') ? date('d-m-Y', strtotime($sd)) : '';
+                    $history = $historyMap[(int)$rec['w_id']] ?? [];
+                    $statusBgColor = function($s) {
+                        if ($s === 'WIP')       return '#fff3cd'; // yellow
+                        if ($s === 'COMPLETED') return '#d4edda'; // green
+                        if ($s === 'HOLD')      return '#f8d7da'; // red/pink
+                        if ($s === 'PAUSE')     return '#d1ecf1'; // blue/cyan
+                        return '#e2e3e5';
+                    };
+                    $statusTextColor = function($s) {
+                        if ($s === 'WIP')       return '#856404';
+                        if ($s === 'COMPLETED') return '#155724';
+                        if ($s === 'HOLD')      return '#721c24';
+                        if ($s === 'PAUSE')     return '#0c5460';
+                        return '#383d41';
+                    };
+                    if (!empty($history)) {
+                        $firstStatus = $history[0]['status'];
+                        $sdHtml = '<strong>' . $sdDisplay . '</strong>'
+                            . ' <span class="label ' . $statusLabelClass($firstStatus) . '">(' . $firstStatus . ')</span>';
+                        for ($hi = 1; $hi < count($history); $hi++) {
+                            $h = $history[$hi];
+                            $hDate = date('d-m-Y H:i', strtotime($h['changed_date']));
+                            $bg   = $statusBgColor($h['status']);
+                            $col  = $statusTextColor($h['status']);
+                            $sdHtml .= '<br><span style="display:inline-block;margin-top:3px;padding:2px 7px;border-radius:4px;background:' . $bg . ';color:' . $col . ';font-size:11px;">'
+                                . '&rarr; ' . $hDate . ' &nbsp;<b>(' . $h['status'] . ')</b></span>';
+                        }
+                        $row[] = $sdHtml;
+                    } else {
+                        $row[] = $sdDisplay;
+                    }
                     // No. of Persons
                     $row[] = $rec['no_of_persons'] ?? 0;
                     // Assigned Employees
@@ -3849,6 +3994,14 @@ class Api extends BaseController
                 ];
                 $db->table('aa_weekly_work')->insert($weeklyData);
                 $w_id = $db->insertID();
+
+                // Record initial status in history
+                $db->table('aa_weekly_work_status_history')->insert([
+                    'w_id'         => $w_id,
+                    'status'       => $weeklyData['status'],
+                    'changed_date' => date('Y-m-d H:i:s'),
+                    'changed_by'   => $u_id,
+                ]);
 
                 // Save assigned employees
                 $employee_ids = $request->getPost('employee_ids') ?? [];
@@ -3959,6 +4112,10 @@ class Api extends BaseController
                 }
                 $w_id = intval($w_id);
 
+                // Fetch current status BEFORE updating so we can detect a status change
+                $oldWork = $db->table('aa_weekly_work')->select('status')->where('w_id', $w_id)->get()->getRowArray();
+                $oldStatus = $oldWork['status'] ?? '';
+
                 $updateData = [
                     'p_id' => $request->getPost('p_id'),
                     'week_from' => $request->getPost('week_from'),
@@ -3973,6 +4130,17 @@ class Api extends BaseController
                     'dependency_date' => $request->getPost('dependency_date') ?: null,
                 ];
                 $db->table('aa_weekly_work')->where('w_id', $w_id)->update($updateData);
+
+                // If status changed, record it in history
+                $newStatus = $updateData['status'];
+                if ($oldStatus !== '' && $oldStatus !== $newStatus) {
+                    $db->table('aa_weekly_work_status_history')->insert([
+                        'w_id'         => $w_id,
+                        'status'       => $newStatus,
+                        'changed_date' => date('Y-m-d H:i:s'),
+                        'changed_by'   => $u_id,
+                    ]);
+                }
 
                 // Update assigned employees
                 $db->table('aa_weekly_work_users')->where('weekly_work_id', $w_id)->delete();
@@ -5346,6 +5514,22 @@ class Api extends BaseController
                 $records = $db->query($sql)->getResultArray();
                 $totalData = count($records);
 
+                // Batch-fetch status history for all records
+                $pdWIds = array_column($records, 'w_id');
+                $pdHistoryMap = [];
+                if (!empty($pdWIds)) {
+                    $pdHistoryRows = $db->table('aa_weekly_work_status_history')
+                        ->whereIn('w_id', $pdWIds)
+                        ->orderBy('changed_date', 'ASC')
+                        ->get()->getResultArray();
+                    foreach ($pdHistoryRows as $hr) {
+                        $pdHistoryMap[(int)$hr['w_id']][] = $hr;
+                    }
+                }
+                $pdStatusBg   = ['WIP'=>'#fff3cd','COMPLETED'=>'#d4edda','HOLD'=>'#f8d7da','PAUSE'=>'#d1ecf1'];
+                $pdStatusCol  = ['WIP'=>'#856404','COMPLETED'=>'#155724','HOLD'=>'#721c24','PAUSE'=>'#0c5460'];
+                $pdLabelClass = ['WIP'=>'label-warning','COMPLETED'=>'label-success','HOLD'=>'label-danger','PAUSE'=>'label-info'];
+
                 $result = [];
                 foreach ($records as $row) {
                     $nestedData = [];
@@ -5359,7 +5543,27 @@ class Api extends BaseController
                     $wt = !empty($row['week_to'])   ? date('d-m-Y', strtotime($row['week_to']))   : '';
                     $nestedData[] = htmlspecialchars($wf . ' to ' . $wt);
                     $nestedData[] = htmlspecialchars($row['task_name'] ?? '');
-                    $nestedData[] = htmlspecialchars($row['submission_date'] ?? '');
+                    // Submission date + status history
+                    $sd = $row['submission_date'] ?? '';
+                    $sdDisplay = (!empty($sd) && $sd !== '0000-00-00') ? date('d-m-Y', strtotime($sd)) : '';
+                    $pdHistory = $pdHistoryMap[(int)$row['w_id']] ?? [];
+                    if (!empty($pdHistory)) {
+                        $fs    = $pdHistory[0]['status'];
+                        $lc    = $pdLabelClass[$fs] ?? 'label-default';
+                        $sdHtml  = '<strong>' . $sdDisplay . '</strong> <span class="label ' . $lc . '">(' . $fs . ')</span>';
+                        $sdPlain = $sdDisplay . ' (' . $fs . ')';
+                        for ($hi = 1; $hi < count($pdHistory); $hi++) {
+                            $h    = $pdHistory[$hi];
+                            $hDt  = date('d-m-Y H:i', strtotime($h['changed_date']));
+                            $bg   = $pdStatusBg[$h['status']]  ?? '#e2e3e5';
+                            $col  = $pdStatusCol[$h['status']] ?? '#383d41';
+                            $sdHtml  .= '<br><span style="display:inline-block;margin-top:3px;padding:2px 7px;border-radius:4px;background:' . $bg . ';color:' . $col . ';font-size:11px;">&rarr; ' . $hDt . ' &nbsp;<b>(' . $h['status'] . ')</b></span>';
+                            $sdPlain .= ' -> ' . $hDt . ' (' . $h['status'] . ')';
+                        }
+                        $nestedData[] = ['display' => $sdHtml, '@' => $sdPlain, 'sort' => $sdDisplay];
+                    } else {
+                        $nestedData[] = $sdDisplay;
+                    }
                     $nestedData[] = htmlspecialchars($row['status'] ?? '');
                     $depHTML = '';
                     if (!empty($row['incomplete_deps']) && $row['incomplete_deps'] > 0) {

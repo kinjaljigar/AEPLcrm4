@@ -205,9 +205,15 @@ $users = $view_data['users'];
                     <div id="main_message_view"></div>
                     <hr>
                     <div id="all_replies_view" class="reply-box-area" style="max-height:300px;overflow-y:auto;"></div>
-                    <div class="form-group"><label>Your Reply</label><textarea class="form-control" id="reply_text" name="reply_text"></textarea></div><input type="hidden" id="reply_msg_id">
+                    <?php if (empty($view_data['admin_session']['u_is_apl'])) { ?>
+                    <div class="form-group"><label>Your Reply</label><textarea class="form-control" id="reply_text" name="reply_text"></textarea></div>
+                    <?php } ?>
+                    <input type="hidden" id="reply_msg_id">
                 </div>
-                <div class="modal-footer"><button type="button" onclick="saveReply()" class="btn btn-primary">Reply</button>
+                <div class="modal-footer">
+                    <?php if (empty($view_data['admin_session']['u_is_apl'])) { ?>
+                    <button type="button" onclick="saveReply()" class="btn btn-primary">Reply</button>
+                    <?php } ?>
                     <button type="button" class="btn btn-warning" data-dismiss="modal">Close</button>
                 </div>
             </div>

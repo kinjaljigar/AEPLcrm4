@@ -642,7 +642,7 @@ class Ticket extends BaseController
         header('Content-Disposition: attachment; filename="' . $filename . '"');
         header('Cache-Control: max-age=0');
 
-        $cols = 9;
+        $cols = 10;
         echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
         echo '<head><meta charset="UTF-8"><style>
             td,th{font-size:10pt;vertical-align:top;}
@@ -659,7 +659,7 @@ class Ticket extends BaseController
 
         // Column header row
         echo '<tr>';
-        foreach (['#', 'Date Created', 'Ticket No', 'Category', 'Desktop No', 'Created By', 'Status', 'Closed Date', 'Closed By'] as $h) {
+        foreach (['Sr No', 'Ticket Number', 'Category', 'Title', 'Desktop Number', 'Created By', 'Created Date', 'Status', 'Closed Date', 'Closed By'] as $h) {
             echo '<th class="th-hdr">' . $h . '</th>';
         }
         echo '</tr>';
@@ -671,20 +671,19 @@ class Ticket extends BaseController
             // Ticket data row
             echo '<tr>';
             echo '<td style="text-align:center;">' . $sr++ . '</td>';
-            echo '<td>' . date('d M Y, h:i A', strtotime($t['created_at'])) . '</td>';
             echo '<td style="font-weight:bold;">' . htmlspecialchars($t['ticket_number']) . '</td>';
             echo '<td>' . htmlspecialchars($t['category_name'] ?? '') . '</td>';
-            echo '<td>' . htmlspecialchars($t['desktop_number'] ?? '') . '</td>';
+            echo '<td>' . htmlspecialchars($t['subject'] ?? '') . '</td>';
+            echo '<td style="mso-number-format:\'\\@\';">' . htmlspecialchars($t['desktop_number'] ?? '') . '</td>';
             echo '<td>' . htmlspecialchars($t['created_by_name'] ?? '') . '</td>';
+            echo '<td>' . date('d M Y, h:i A', strtotime($t['created_at'])) . '</td>';
             echo '<td style="text-align:center;">' . ucfirst($t['status']) . '</td>';
             echo '<td>' . ($is_closed && !empty($t['closed_at']) ? date('d M Y, h:i A', strtotime($t['closed_at'])) : '') . '</td>';
             echo '<td>' . htmlspecialchars($is_closed ? ($t['closed_by_name'] ?? '') : '') . '</td>';
             echo '</tr>';
 
-            // Subject row
-            echo '<tr><td></td><td colspan="' . ($cols - 1) . '" style="font-weight:bold;background:#F2F2F2;">Subject: ' . htmlspecialchars($t['subject'] ?? '') . '</td></tr>';
             if (!empty($t['description'])) {
-                echo '<tr><td></td><td colspan="' . ($cols - 1) . '" style="color:#444;">Description: ' . nl2br(htmlspecialchars($t['description'])) . '</td></tr>';
+                echo '<tr><td></td><td colspan="' . ($cols - 1) . '" style="color:#444;background:#F2F2F2;">Description: ' . nl2br(htmlspecialchars($t['description'])) . '</td></tr>';
             }
 
             // Conversation messages

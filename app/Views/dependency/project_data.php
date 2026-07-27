@@ -283,6 +283,16 @@ $friday = date('Y-m-d', strtotime('friday this week'));
                     "orderable": false
                 },
                 {
+                    "targets": 8,
+                    "render": function(data, type, row) {
+                        if (typeof data === 'object' && data !== null) {
+                            if (type === 'display') return data.display || '';
+                            return data['@'] || data.sort || '';
+                        }
+                        return data;
+                    }
+                },
+                {
                     "targets": 9,
                     "render": function(data, type, row) {
                         if (type !== 'display') return data;
