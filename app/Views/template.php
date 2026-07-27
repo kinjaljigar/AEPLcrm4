@@ -208,8 +208,9 @@ if (isset($view_data['plugins'])) {
                                 //$menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');
                                 $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
                             } else if ($u_type === 'Employee' && !empty($view_data['admin_session']['u_is_apl'])) {
-                                // Assistant Project Leader — view-only Mail Links access
+                                // Assistant Project Leader — same links as Employee + Mail Links
                                 $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
+                                $menu['tasks'] = array('Tasks', 'home/tasks', 'fa-tasks');
                                 $menu['leave_request'] = array('Leave Request', 'home/leaves', 'fa-briefcase');
                                 $menu['timesheet'] = array('Timesheet', 'home/timesheet', 'fa-briefcase');
                                 $menu['holidays'] = array('Holiday', 'home/holidays', 'fa-plane');
