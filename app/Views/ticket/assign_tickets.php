@@ -126,6 +126,16 @@ $show_closed_cols = (isset($view_data['status']) && $view_data['status'] === 'cl
             "language": {
                 "emptyTable": "No tickets found."
             },
+            <?php if ($show_export): ?>
+            "dom": 'Blfrtip',
+            "buttons": [
+                <?php $exp_cols = $show_closed_cols ? '[0,1,2,3,4,5,6,7,8,9]' : '[0,1,2,3,4,5,6,7]'; ?>
+                { extend: 'copy',  exportOptions: { columns: <?= $exp_cols ?> } },
+                { extend: 'excel', exportOptions: { columns: <?= $exp_cols ?> } },
+                { extend: 'pdf',   exportOptions: { columns: <?= $exp_cols ?> } },
+                { extend: 'print', exportOptions: { columns: <?= $exp_cols ?> } },
+            ],
+            <?php endif; ?>
         });
 
         // Wire up Export with Conversations button using current filter values

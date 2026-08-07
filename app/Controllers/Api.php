@@ -5483,6 +5483,7 @@ class Api extends BaseController
                 $project_id = $request->getPost('project_id');
                 $filter_status = $request->getPost('filter_status');
 
+                $effectiveTd = null; // used to determine status at searched to_date
                 $sql = "SELECT w.*, p.p_name AS project_name, u.u_name AS leader_name,
                     (SELECT COUNT(*) FROM aa_users WHERE u_leader = w.leader_id) AS team_assigned,
                     (SELECT GROUP_CONCAT(u2.u_name ORDER BY u2.u_name SEPARATOR ', ') FROM aa_weekly_work_users wu JOIN aa_users u2 ON u2.u_id = wu.u_id WHERE wu.weekly_work_id = w.w_id) AS assigned_users,
@@ -5497,6 +5498,7 @@ class Api extends BaseController
                 if ($from_date && $to_date) {
                     $fd = date('Y-m-d', strtotime($from_date));
                     $td = date('Y-m-d', strtotime($to_date));
+                    $effectiveTd = $td;
                     if (in_array($filter_status, ['PAUSE', 'HOLD'])) {
                         // When filtering specifically for PAUSE/HOLD, skip date filter - show all
                     } elseif (empty($filter_status) || $filter_status === 'All') {
@@ -5564,7 +5566,23 @@ class Api extends BaseController
                     } else {
                         $nestedData[] = $sdDisplay;
                     }
-                    $nestedData[] = htmlspecialchars($row['status'] ?? '');
+                    // Determine effective status at the searched to_date (not the current final status)
+                    $effectiveStatus = $row['status'] ?? '';
+                    if ($effectiveTd !== null && !empty($pdHistoryMap[(int)$row['w_id']])) {
+                        $lastBeforeTd = null;
+                        foreach ($pdHistoryMap[(int)$row['w_id']] as $h) {
+                            if (substr($h['changed_date'], 0, 10) <= $effectiveTd) {
+                                $lastBeforeTd = $h['status'];
+                            }
+                        }
+                        if ($lastBeforeTd !== null) {
+                            $effectiveStatus = $lastBeforeTd;
+                        } else {
+                            // No history entry on/before to_date — use the first (oldest) known status
+                            $effectiveStatus = $pdHistoryMap[(int)$row['w_id']][0]['status'];
+                        }
+                    }
+                    $nestedData[] = htmlspecialchars($effectiveStatus);
                     $depHTML = '';
                     if (!empty($row['incomplete_deps']) && $row['incomplete_deps'] > 0) {
                         $depHTML .= '<br><a href="javascript:void(0);" class="btn btn-warning btn-xs view-dep-btn" data-wid="' . $row['w_id'] . '" data-type="incomplete">View Incomplete (' . $row['incomplete_deps'] . ')</a>';

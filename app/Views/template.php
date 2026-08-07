@@ -214,6 +214,11 @@ if (isset($view_data['plugins'])) {
                                 $menu['leave_request'] = array('Leave Request', 'home/leaves', 'fa-briefcase');
                                 $menu['timesheet'] = array('Timesheet', 'home/timesheet', 'fa-briefcase');
                                 $menu['holidays'] = array('Holiday', 'home/holidays', 'fa-plane');
+                                $apl_ticket_sub = array();
+                                $apl_ticket_sub['raiseticket'] = array('Raise Ticket', 'ticket/add', 'fa-ticket');
+                                $apl_ticket_sub['ticket'] = array('Ticket History', 'ticket/my', 'fa-ticket');
+                                $apl_ticket_sub['assignticket'] = array('Assign Tickets', 'ticket/assigned', 'fa-comment');
+                                $menu['tickets'] = array('Tickets', '#', 'fa-file', $apl_ticket_sub);
                             } else {
                                 if ($u_type != 'Associate User') {
                                     if ($u_type == 'Master Admin' || $u_type == 'Super Admin' || $u_type == 'Bim Head') {

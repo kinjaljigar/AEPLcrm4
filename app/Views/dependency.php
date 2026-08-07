@@ -689,9 +689,14 @@ $employees = $view_data['employees'];
                 newRow.find('select[name="dep_type[]"]').val(dep.dependency_type || '');
                 newRow.find('select[name="dep_priority[]"]').val(dep.priority || '');
                 newRow.find('select[name="dep_status[]"]').val(dep.status || '');
-                newRow.find('input[name="dep_target_date[]"]').val(
+                var $depDateInput = newRow.find('input[name="dep_target_date[]"]');
+                $depDateInput.val(
                     dep.target_date && dep.target_date !== '0000-00-00' ? dep.target_date : ''
                 );
+                // Already-completed dependencies may have a past date — remove min constraint
+                if (dep.status === 'Completed') {
+                    $depDateInput.removeAttr('min');
+                }
 
                 if (dep.dependency_type === 'Internal') {
                     showDependencyLeaders(newRow);
@@ -760,6 +765,22 @@ $employees = $view_data['employees'];
             jQuery(this).closest('.dependency_row').remove();
         });
     }
+
+    // When dep status changes: manage min-date and auto-fill completed date
+    $(document).on('change', 'select[name="dep_status[]"]', function() {
+        var $dateInput = $(this).closest('.dependency_row').find('input[name="dep_target_date[]"]');
+        if ($(this).val() === 'Completed') {
+            // Remove min restriction so past dates are accepted
+            $dateInput.removeAttr('min');
+            // Auto-fill today's date if date is empty
+            if (!$dateInput.val()) {
+                $dateInput.val('<?= date('Y-m-d') ?>');
+            }
+        } else {
+            // Pending: re-apply today as minimum
+            $dateInput.attr('min', '<?= date('Y-m-d') ?>');
+        }
+    });
 
     function attachTypeChangeEvent(scope) {
         var selector = scope ? scope.find('.dep_type') : jQuery(".dep_type");
