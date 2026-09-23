@@ -195,6 +195,11 @@ if (isset($view_data['plugins'])) {
                             $multi_levelReport['employee_project_report'] = array('Employee Project Report', 'home/report_project_employee', 'fa-hand-o-right');
                             $multi_levelReport['employee_work_report'] = array('Employee Project Work Report', 'home/report_employee_work', 'fa-hand-o-right');
                             $multi_levelReport['project_profitreport'] = array('Profit/Loss Report', 'home/report_profitloss', 'fa-hand-o-right');
+                            // Pending Approvals with count badge (Master Admin)
+                            $_apl_db2 = \Config\Database::connect();
+                            $_apl_count2 = $_apl_db2->table('aa_apl_requests')->where('apr_status','Pending')->countAllResults();
+                            $_apl_label2 = $_apl_count2 > 0 ? ' <span class="badge" style="background:#f0ad4e;color:#000;">' . $_apl_count2 . '</span>' : '';
+                            $menu['approvals'] = array('APL Pending Approvals' . $_apl_label2, 'home/approvals', 'fa-bell');
                             $menu['tickets'] = array('Tickets', '#', 'fa-file', $multi_levelticket);
                             $menu['CRM'] = array('CRM', '#', 'fa-file', $multi_level);
                             $menu['Reports'] = array('Reports', '#', 'fa-file', $multi_levelReport);
@@ -227,6 +232,11 @@ if (isset($view_data['plugins'])) {
                                         $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
                                         $menu['employees'] = array('Employees', 'home/employees', 'fa-users');
                                         $menu['settings'] = array('Settings', 'home/settings', 'fa-cogs');
+                                        // Pending Approvals with count badge
+                                        $_apl_db = \Config\Database::connect();
+                                        $_apl_count = $_apl_db->table('aa_apl_requests')->where('apr_status','Pending')->countAllResults();
+                                        $_apl_label = $_apl_count > 0 ? ' <span class="badge" style="background:#f0ad4e;color:#000;">' . $_apl_count . '</span>' : '';
+                                        $menu['approvals'] = array('APL Pending Approvals' . $_apl_label, 'home/approvals', 'fa-bell');
                                     }
                                     if ($u_type == 'Project Leader') {
                                         $menu['dashboard'] = array('Dashboard', 'home/index', 'fa-dashboard');

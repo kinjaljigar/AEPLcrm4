@@ -344,34 +344,46 @@ class Api extends BaseController
                 exit;
 
             case 'leavestoday':
-                $leaderid = $request->getPost('leaderid');
-                $today = date('Y-m-d');
-                $builder = $db->table('aa_leaves L')
-                    ->select('L.*, U.u_name, U.u_department, AB.u_type as approved_by_type, AB.u_name as approved_by_name')
-                    ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
-                    ->join('aa_users AB', 'L.l_approved_by_id = AB.u_id', 'left')
-                    ->where('L.l_status', 'Approved')
-                    ->where('L.l_from_date <=', $today)
-                    ->where('L.l_to_date >=', $today)
-                    ->orderBy('U.u_name', 'ASC')
-                    ->limit(5);
+                try {
+                    $leaderid = $request->getPost('leaderid');
+                    $today = date('Y-m-d');
+                    $builder = $db->table('aa_leaves L')
+                        ->select('L.l_id, L.l_u_id, L.l_status, L.l_is_halfday, L.l_halfday_time, L.l_is_hourly, L.l_hourly_time, L.l_approved_by, U.u_name, U.u_department, U.u_leader')
+                        ->join('aa_users U', 'L.l_u_id = U.u_id', 'left')
+                        ->where('L.l_status', 'Approved')
+                        ->where('L.l_from_date <=', $today)
+                        ->where('L.l_to_date >=', $today)
+                        ->orderBy('U.u_name', 'ASC')
+                        ->limit(5);
 
-                if (!empty($leaderid)) {
-                    $builder->where('U.u_leader', $leaderid);
-                }
+                    // Try to join approved_by user — server may not have l_approved_by_id column yet
+                    try {
+                        $builder->select('AB.u_type as approved_by_type, AB.u_name as approved_by_name')
+                                ->join('aa_users AB', 'L.l_approved_by_id = AB.u_id', 'left');
+                    } catch (\Exception $ex) {
+                        // Column may not exist on this server — skip approved_by join
+                    }
 
-                $leaves = $builder->get()->getResultArray();
-                $data = [];
-                foreach ($leaves as $leave) {
-                    $row = [];
-                    $row[] = $leave['u_name'] ?? '';
-                    $row[] = $leave['u_department'] ?? '';
-                    $row[] = ($leave['l_is_halfday'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_halfday_time'] ?? '') . ')' : 'No';
-                    $row[] = ($leave['l_is_hourly'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_hourly_time'] ?? '') . ')' : 'No';
-                    $approvedByName = !empty($leave['approved_by_name']) ? $leave['approved_by_name'] : ($leave['l_approved_by'] ?? '');
-                    $approvedByType = $leave['approved_by_type'] ?? '';
-                    $row[] = $approvedByName ? ($approvedByType ? $approvedByType . '<br>' : '') . '<b>' . $approvedByName . '</b>' : '';
-                    $data[] = $row;
+                    if (!empty($leaderid)) {
+                        $builder->where('U.u_leader', $leaderid);
+                    }
+
+                    $leaves = $builder->get()->getResultArray();
+                    $data = [];
+                    foreach ($leaves as $leave) {
+                        $row = [];
+                        $row[] = $leave['u_name'] ?? '';
+                        $row[] = $leave['u_department'] ?? '';
+                        $row[] = ($leave['l_is_halfday'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_halfday_time'] ?? '') . ')' : 'No';
+                        $row[] = ($leave['l_is_hourly'] ?? '') === 'Yes' ? 'Yes (' . ($leave['l_hourly_time'] ?? '') . ')' : 'No';
+                        $approvedByName = !empty($leave['approved_by_name']) ? $leave['approved_by_name'] : ($leave['l_approved_by'] ?? '');
+                        $approvedByType = $leave['approved_by_type'] ?? '';
+                        $row[] = $approvedByName ? ($approvedByType ? $approvedByType . '<br>' : '') . '<b>' . $approvedByName . '</b>' : '';
+                        $data[] = $row;
+                    }
+                } catch (\Exception $e) {
+                    log_message('error', 'leavestoday error: ' . $e->getMessage());
+                    $data = [];
                 }
 
                 echo json_encode([
@@ -1992,15 +2004,96 @@ class Api extends BaseController
                 echo json_encode(['status' => 'fail', 'message' => 'Only Project Leaders can assign APL.']);
                 exit;
             }
-            // Verify target employee belongs to this PL via u_leader
-            $plId  = intval($admin_session['u_id']);
-            $emp   = $db->table('aa_users')->select('u_id, u_leader')->where('u_id', $target_uid)->get()->getRowArray();
+            $plId = intval($admin_session['u_id']);
+            $emp  = $db->table('aa_users')->select('u_id, u_leader, u_name, u_is_apl')->where('u_id', $target_uid)->get()->getRowArray();
             if (!$emp || intval($emp['u_leader']) !== $plId) {
                 echo json_encode(['status' => 'fail', 'message' => 'This employee is not assigned to your team. Ask admin to assign them via Employees page.']);
                 exit;
             }
-            $db->table('aa_users')->where('u_id', $target_uid)->update(['u_is_apl' => $is_apl]);
-            echo json_encode(['status' => 'pass', 'message' => $is_apl ? 'Employee set as Assistant Project Leader.' : 'APL role removed.']);
+            $action = $is_apl == 0 ? 'remove' : 'add';
+            // Check if a pending request already exists for this action
+            $existing = $db->table('aa_apl_requests')->where('apr_u_id', $target_uid)->where('apr_pl_id', $plId)->where('apr_status', 'Pending')->where('apr_action', $action)->get()->getRowArray();
+            if ($existing) {
+                echo json_encode(['status' => 'fail', 'message' => 'An approval request is already pending for this employee.']);
+                exit;
+            }
+            // Create approval request
+            $db->table('aa_apl_requests')->insert([
+                'apr_u_id'       => $target_uid,
+                'apr_pl_id'      => $plId,
+                'apr_status'     => 'Pending',
+                'apr_action'     => $action,
+                'apr_created_at' => date('Y-m-d H:i:s'),
+            ]);
+            // Send desktop notification to all Bim Head / Master Admin / Super Admin
+            $notifMsg = $action === 'add'
+                ? $admin_session['u_name'] . ' has requested to assign ' . ($emp['u_name'] ?? '') . ' as Assistant Project Leader.'
+                : $admin_session['u_name'] . ' has requested to remove ' . ($emp['u_name'] ?? '') . ' from Assistant Project Leader role.';
+            $approvers = $db->table('aa_users')->select('u_id')->whereIn('u_type', ['Master Admin', 'Super Admin', 'Bim Head'])->where('u_status', 'Active')->get()->getResultArray();
+            foreach ($approvers as $approver) {
+                $db->table('aa_desktop_notification_queue')->insert([
+                    'u_id'    => $approver['u_id'],
+                    'title'   => 'APL Approval Request',
+                    'message' => $notifMsg,
+                    'payload' => json_encode(['screen_name' => 'Approvals', 'url' => 'home/approvals']),
+                    'is_sent' => 0,
+                ]);
+            }
+            $successMsg = $action === 'add'
+                ? 'APL request submitted. Awaiting approval from Bim Head / Admin.'
+                : 'APL removal request submitted. Awaiting approval from Bim Head / Admin.';
+            echo json_encode(['status' => 'pass', 'message' => $successMsg]);
+            exit;
+        }
+
+        // Handle APL approval/rejection by admins
+        if ($act === 'apl_request') {
+            $sub = $request->getPost('sub');
+
+            if ($sub === 'count') {
+                $count = $db->table('aa_apl_requests')->where('apr_status', 'Pending')->countAllResults();
+                echo json_encode(['status' => 'pass', 'count' => $count]);
+                exit;
+            }
+
+            if (!in_array($admin_session['u_type'], ['Master Admin', 'Super Admin', 'Bim Head'])) {
+                echo json_encode(['status' => 'fail', 'message' => 'Not authorized.']);
+                exit;
+            }
+
+            if ($sub === 'approve' || $sub === 'reject') {
+                $apr_id  = intval($request->getPost('apr_id'));
+                $reqRow  = $db->table('aa_apl_requests')->where('apr_id', $apr_id)->where('apr_status', 'Pending')->get()->getRowArray();
+                if (!$reqRow) {
+                    echo json_encode(['status' => 'fail', 'message' => 'Request not found or already processed.']);
+                    exit;
+                }
+                $newStatus = $sub === 'approve' ? 'Approved' : 'Rejected';
+                $db->table('aa_apl_requests')->where('apr_id', $apr_id)->update([
+                    'apr_status'      => $newStatus,
+                    'apr_reviewed_by' => $admin_session['u_id'],
+                    'apr_reviewed_at' => date('Y-m-d H:i:s'),
+                ]);
+                $aplAction  = $reqRow['apr_action'] ?? 'add';
+                $empRow     = $db->table('aa_users')->select('u_name')->where('u_id', $reqRow['apr_u_id'])->get()->getRowArray();
+                $empName    = $empRow['u_name'] ?? 'Employee';
+                if ($sub === 'approve') {
+                    $newAplVal = $aplAction === 'add' ? 1 : 0;
+                    $db->table('aa_users')->where('u_id', $reqRow['apr_u_id'])->update(['u_is_apl' => $newAplVal]);
+                }
+                // Notify the PL of the decision (with employee name and action)
+                $actionLabel = $aplAction === 'add' ? 'Add APL' : 'Remove APL';
+                $notifMsg    = 'Your request to ' . strtolower($actionLabel) . ' for ' . $empName . ' has been ' . strtolower($newStatus) . ' by ' . $admin_session['u_name'] . '.';
+                $db->table('aa_desktop_notification_queue')->insert([
+                    'u_id'    => $reqRow['apr_pl_id'],
+                    'title'   => 'APL Request ' . $newStatus,
+                    'message' => $notifMsg,
+                    'payload' => json_encode(['screen_name' => 'MyTeam', 'url' => 'home/myteam']),
+                    'is_sent' => 0,
+                ]);
+                echo json_encode(['status' => 'pass', 'message' => 'Request ' . strtolower($newStatus) . ' successfully.']);
+                exit;
+            }
             exit;
         }
 
@@ -2907,7 +3000,12 @@ class Api extends BaseController
             $row[] = isset($leave['l_create_date']) ? convert_db2display($leave['l_create_date']) : '';
             $row[] = isset($leave['l_from_date']) ? convert_db2display($leave['l_from_date'], false) : '';
             $row[] = isset($leave['l_to_date']) ? convert_db2display($leave['l_to_date'], false) : '';
-            $row[] = $leave['l_message'] ?? '';
+            $msgCell = $leave['l_message'] ?? '';
+            if (!empty($leave['l_reply'])) {
+                $byName = !empty($leave['approved_by_name']) ? $leave['approved_by_name'] : ($leave['l_approved_by'] ?? '');
+                $msgCell .= '<br/><hr style="margin:4px 0;"/><small><b>Reply' . ($byName ? ' by ' . htmlspecialchars($byName) : '') . ':</b><br/>' . nl2br(htmlspecialchars($leave['l_reply'])) . '</small>';
+            }
+            $row[] = $msgCell;
             // Use explicit alias first (avoids L.* shadowing with double aa_users JOIN)
             $status = $leave['leave_status_explicit'] ?? $leave['l_status'] ?? '';
             $approvedByType = $leave['approved_by_type'] ?? '';

@@ -3,6 +3,10 @@
         background-color: #fff3cd !important;
     }
 
+    .starred-row td {
+        background-color: #ffe082 !important;
+    }
+
     .content-column {
         max-width: 250px;
     }
@@ -549,6 +553,7 @@
                         <table class="table table-bordered table-hover responsive nowrap" width="100%">
                             <thead>
                                 <tr>
+                                    <th width="30" style="text-align:center;" title="Star / Favourite"><i class="fa fa-star" style="color:#f0ad4e;"></i></th>
                                     <th>#</th>
                                     <th>Date</th>
                                     <th>Project</th>
@@ -560,26 +565,28 @@
 
                                 <?php if (!empty($view_data['todaysmessages'])): ?>
                                     <?php foreach ($view_data['todaysmessages'] as $i => $dep): ?>
-                                        <tr>
-                                            <td><?= $i + 1; ?></td>
-                                            <td>
-                                                <?= date("M d, Y", strtotime($dep['pm_datetime'])); ?>
+                                        <tr class="<?= $dep['is_starred'] ? 'starred-row' : '' ?>">
+                                            <td style="text-align:center;">
+                                                <button class="btn btn-xs <?= $dep['is_starred'] ? 'btn-warning' : 'btn-default' ?> dash-star-btn"
+                                                    data-pm-id="<?= (int)$dep['pm_id'] ?>"
+                                                    title="<?= $dep['is_starred'] ? 'Unstar' : 'Star' ?>">
+                                                    <i class="fa fa-star"></i>
+                                                </button>
                                             </td>
+                                            <td><?= $i + 1; ?></td>
+                                            <td><?= date("M d, Y", strtotime($dep['pm_datetime'])); ?></td>
                                             <td><?= (!empty($dep['p_name']) ? $dep['p_name'] : 'General'); ?></td>
                                             <td class="content-column" title="<?= htmlspecialchars($dep['dependency_text']); ?>">
                                                 <span class="short-text">
                                                     <?= (!empty($dep['pm_text']) ? htmlspecialchars(mb_strimwidth($dep['pm_text'], 0, 200, '...')) : ''); ?>
                                                 </span>
                                             </td>
-
                                             <td><?= !empty($dep['pm_descipline']) ? $dep['pm_descipline'] : ''; ?></td>
-
-
                                         </tr>
                                     <?php endforeach; ?>
                                 <?php else: ?>
                                     <tr>
-                                        <td colspan="9">No Mail Links For Today found</td>
+                                        <td colspan="6">No Mail Links For Today found</td>
                                     </tr>
                                 <?php endif; ?>
                             </tbody>
@@ -868,6 +875,22 @@
     }
 
     function document_ready() {
+        // Dashboard star toggle for Today's Mail Links
+        $(document).on('click', '.dash-star-btn', function() {
+            var $btn  = $(this);
+            var pm_id = $btn.data('pm-id');
+            doAjax('api/projectmessages', 'POST', { act: 'star', pm_id: pm_id }, function(res) {
+                if (res && res.status === 'pass') {
+                    if (res.starred) {
+                        $btn.removeClass('btn-default').addClass('btn-warning').attr('title', 'Unstar');
+                        $btn.closest('tr').addClass('starred-row');
+                    } else {
+                        $btn.removeClass('btn-warning').addClass('btn-default').attr('title', 'Star');
+                        $btn.closest('tr').removeClass('starred-row');
+                    }
+                }
+            });
+        });
         leaderid = null;
         <?php if ($view_data['authorization']->is_role_allowed($view_data['admin_session']['u_type'], ['Project Leader'])) { ?>
             leaderid = '<?php print $view_data['admin_session']['u_id'] ?>';

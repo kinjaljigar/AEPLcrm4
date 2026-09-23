@@ -150,7 +150,8 @@ class Home extends BaseController
         try {
             $today = date('Y-m-d');
             $msgBuilder = $db->table('aa_project_messages PM')
-                ->select('PM.pm_id, PM.pm_text, PM.pm_datetime, PM.pm_descipline, P.p_name')
+                ->select('PM.pm_id, PM.pm_text, PM.pm_datetime, PM.pm_descipline, P.p_name,
+                    COALESCE((SELECT pmu_starred FROM aa_project_message_users WHERE pmu_pm_id = PM.pm_id AND pmu_u_id = ' . (int)$u_id . '), 0) as is_starred')
                 ->join('aa_projects P', 'PM.pm_p_id = P.p_id', 'left')
                 ->where('PM.pm_deleted', 0)
                 ->where('DATE(PM.pm_datetime)', $today)
@@ -388,7 +389,6 @@ class Home extends BaseController
         $db   = \Config\Database::connect();
         $u_id = (int)$this->admin_session['u_id'];
 
-        // Team = employees formally assigned to this PL via u_leader
         $team = $db->table('aa_users')
             ->select('u_id, u_name, u_username, u_email, u_mobile, u_department, u_status, COALESCE(u_is_apl, 0) AS u_is_apl')
             ->where('u_leader', $u_id)
@@ -396,12 +396,76 @@ class Home extends BaseController
             ->orderBy('u_name', 'ASC')
             ->get()->getResultArray();
 
+        // Pending APL request UIDs for this PL (keyed by u_id => action)
+        $pendingRows = $db->table('aa_apl_requests')->select('apr_u_id, apr_action')->where('apr_pl_id', $u_id)->where('apr_status', 'Pending')->get()->getResultArray();
+        $pendingUids = []; // uid => action ('add'|'remove')
+        foreach ($pendingRows as $pr) $pendingUids[(int)$pr['apr_u_id']] = $pr['apr_action'];
+
         $this->view_data['team']          = $team;
+        $this->view_data['pending_uids']  = $pendingUids;
         $this->view_data['page']          = 'myteam';
         $this->view_data['meta_title']    = 'My Team';
         $this->view_data['admin_session'] = $this->admin_session;
         $this->view_data['authorization'] = $this->authorization;
         $this->view_data['plugins']       = [];
+        return view('template', ['view_data' => $this->view_data]);
+    }
+
+    public function approvals()
+    {
+        $u_type = $this->admin_session['u_type'] ?? '';
+        if (!in_array($u_type, ['Master Admin', 'Super Admin', 'Bim Head'])) {
+            return redirect()->to(base_url('home/index'));
+        }
+        $db        = \Config\Database::connect();
+        $request   = service('request');
+        $filter_pl = intval($request->getGet('pl_id') ?? 0);
+
+        $sql = "SELECT r.*, e.u_name AS emp_name, e.u_email AS emp_email, e.u_department,
+                       pl.u_name AS pl_name, rv.u_name AS reviewed_by_name
+                FROM aa_apl_requests r
+                LEFT JOIN aa_users e  ON e.u_id  = r.apr_u_id
+                LEFT JOIN aa_users pl ON pl.u_id = r.apr_pl_id
+                LEFT JOIN aa_users rv ON rv.u_id = r.apr_reviewed_by
+                WHERE 1=1";
+        if ($filter_pl > 0) $sql .= " AND r.apr_pl_id = " . $filter_pl;
+        $sql .= " ORDER BY r.apr_status ASC, r.apr_created_at DESC";
+
+        $requests = $db->query($sql)->getResultArray();
+
+        $pls = $db->table('aa_users')->select('u_id, u_name')->where('u_type', 'Project Leader')->where('u_status', 'Active')->orderBy('u_name', 'ASC')->get()->getResultArray();
+
+        // APL summary: all PLs with their currently approved APLs
+        $aplSql = "SELECT pl.u_id AS pl_id, pl.u_name AS pl_name, pl.u_department AS pl_department,
+                          apl.u_id AS apl_id, apl.u_name AS apl_name, apl.u_email AS apl_email, apl.u_department AS apl_department
+                   FROM aa_users pl
+                   LEFT JOIN aa_users apl ON apl.u_leader = pl.u_id AND apl.u_is_apl = 1 AND apl.u_status = 'Active'
+                   WHERE pl.u_type = 'Project Leader' AND pl.u_status = 'Active'";
+        if ($filter_pl > 0) $aplSql .= " AND pl.u_id = " . $filter_pl;
+        $aplSql .= " ORDER BY pl.u_name ASC, apl.u_name ASC";
+        $aplRows = $db->query($aplSql)->getResultArray();
+
+        // Group by PL
+        $aplSummary = [];
+        foreach ($aplRows as $row) {
+            $pid = $row['pl_id'];
+            if (!isset($aplSummary[$pid])) {
+                $aplSummary[$pid] = ['pl_name' => $row['pl_name'], 'pl_department' => $row['pl_department'], 'apls' => []];
+            }
+            if (!empty($row['apl_id'])) {
+                $aplSummary[$pid]['apls'][] = ['u_id' => $row['apl_id'], 'u_name' => $row['apl_name'], 'u_email' => $row['apl_email'], 'u_department' => $row['apl_department']];
+            }
+        }
+
+        $this->view_data['requests']      = $requests;
+        $this->view_data['pls']           = $pls;
+        $this->view_data['filter_pl']     = $filter_pl;
+        $this->view_data['apl_summary']   = $aplSummary;
+        $this->view_data['page']          = 'approvals';
+        $this->view_data['meta_title']    = 'APL Pending Approvals';
+        $this->view_data['admin_session'] = $this->admin_session;
+        $this->view_data['authorization'] = $this->authorization;
+        $this->view_data['plugins']       = ['datatable' => true];
         return view('template', ['view_data' => $this->view_data]);
     }
 
