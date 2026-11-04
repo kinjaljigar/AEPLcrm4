@@ -60,6 +60,7 @@ $routes->post('home/task/add/(:num)/(:num)', 'Home::taskAdd/$1/$2');
 // Other core routes
 $routes->get('home/tasks', 'Home::tasks');
 $routes->get('home/myteam', 'Home::myteam');
+$routes->get('home/myprojects', 'Home::myprojects');
 $routes->get('home/approvals', 'Home::approvals');
 $routes->get('home/projects', 'Home::projects');
 $routes->get('home/employees', 'Home::employees');
@@ -189,3 +190,5 @@ $routes->post('schedule', 'Schedule::index');
 $routes->post('company', 'Company::index');
 $routes->post('companyuser', 'CompanyUser::index');
 $routes->post('usertask', 'UserTask::index');
+
+

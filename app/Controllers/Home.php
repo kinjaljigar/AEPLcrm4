@@ -411,6 +411,128 @@ class Home extends BaseController
         return view('template', ['view_data' => $this->view_data]);
     }
 
+    public function myprojects()
+    {
+        $u_type  = $this->admin_session['u_type'] ?? '';
+        $u_id    = (int)($this->admin_session['u_id'] ?? 0);
+        $u_is_apl = (int)($this->admin_session['u_is_apl'] ?? 0);
+
+        $is_pl  = ($u_type === 'Project Leader');
+        $is_apl = ($u_type === 'Employee' && $u_is_apl === 1);
+
+        if (!$is_pl && !$is_apl) {
+            return redirect()->to(base_url('home/index'));
+        }
+
+        $db = \Config\Database::connect();
+
+        if ($is_pl) {
+            $projects = $db->query(
+                "SELECT p_id, p_number, p_name, p_status, p_address, p_leader
+                 FROM aa_projects
+                 WHERE FIND_IN_SET(?, p_leader)
+                 ORDER BY p_number ASC",
+                [$u_id]
+            )->getResultArray();
+        } else {
+            // APL — show projects belonging to their Project Leader
+            $leader_id = (int)($this->admin_session['u_leader'] ?? 0);
+            $projects = $leader_id > 0
+                ? $db->query(
+                    "SELECT p_id, p_number, p_name, p_status, p_address, p_leader
+                     FROM aa_projects
+                     WHERE FIND_IN_SET(?, p_leader)
+                     ORDER BY p_number ASC",
+                    [$leader_id]
+                )->getResultArray()
+                : [];
+        }
+
+        $apl_name        = '';   // single APL name for all projects
+        $team_by_project = [];
+
+        if (!empty($projects)) {
+            $project_ids = array_column($projects, 'p_id');
+
+            // One PL → at most one APL. Fetch once and display on every project row.
+            if ($is_pl) {
+                $apl_row = $db->query(
+                    "SELECT u_name FROM aa_users
+                     WHERE u_is_apl = 1 AND u_status = 'Active' AND u_leader = ?
+                     LIMIT 1",
+                    [$u_id]
+                )->getRowArray();
+                $apl_name = $apl_row['u_name'] ?? '';
+            } else {
+                // APL viewing their PL's projects — they themselves are the APL
+                $apl_name = $this->admin_session['u_name'] ?? '';
+            }
+
+            // Team members per project via task assignments
+            $ids_str   = implode(',', array_map('intval', $project_ids));
+            $team_rows = $db->query(
+                "SELECT DISTINCT TU.tu_p_id, U.u_name, U.u_department
+                 FROM aa_task2user TU
+                 JOIN aa_users U ON U.u_id = TU.tu_u_id
+                 WHERE TU.tu_p_id IN ($ids_str) AND TU.tu_removed = 'No'
+                 ORDER BY U.u_name ASC"
+            )->getResultArray();
+
+            foreach ($team_rows as $row) {
+                $team_by_project[$row['tu_p_id']][] = [
+                    'u_name'       => $row['u_name'],
+                    'u_department' => $row['u_department'],
+                ];
+            }
+        }
+
+        // Build leaders_by_project: map p_id => array of leader names
+        $leaders_by_project = [];
+        if (!empty($projects)) {
+            $all_leader_ids = [];
+            foreach ($projects as $proj) {
+                if (!empty($proj['p_leader'])) {
+                    foreach (explode(',', $proj['p_leader']) as $lid) {
+                        $lid = (int)trim($lid);
+                        if ($lid > 0) $all_leader_ids[$lid] = $lid;
+                    }
+                }
+            }
+            if (!empty($all_leader_ids)) {
+                $ids_str2 = implode(',', $all_leader_ids);
+                $leader_rows = $db->query(
+                    "SELECT u_id, u_name FROM aa_users WHERE u_id IN ($ids_str2)"
+                )->getResultArray();
+                $leader_map = array_column($leader_rows, 'u_name', 'u_id');
+
+                foreach ($projects as $proj) {
+                    $names = [];
+                    if (!empty($proj['p_leader'])) {
+                        foreach (explode(',', $proj['p_leader']) as $lid) {
+                            $lid = (int)trim($lid);
+                            if ($lid > 0 && $lid !== $u_id && isset($leader_map[$lid])) {
+                                $names[] = $leader_map[$lid];
+                            }
+                        }
+                    }
+                    $leaders_by_project[$proj['p_id']] = $names;
+                }
+            }
+        }
+
+        $this->view_data['projects']            = $projects;
+        $this->view_data['apl_name']            = $apl_name;
+        $this->view_data['team_by_project']     = $team_by_project;
+        $this->view_data['leaders_by_project']  = $leaders_by_project;
+        $this->view_data['is_pl']               = $is_pl;
+        $this->view_data['page']             = 'myprojects';
+        $this->view_data['meta_title']       = 'My Projects';
+        $this->view_data['admin_session']    = $this->admin_session;
+        $this->view_data['authorization']    = $this->authorization;
+        $this->view_data['plugins']          = [];
+        return view('template', ['view_data' => $this->view_data]);
+    }
+
     public function approvals()
     {
         $u_type = $this->admin_session['u_type'] ?? '';

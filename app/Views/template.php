@@ -215,6 +215,7 @@ if (isset($view_data['plugins'])) {
                             } else if ($u_type === 'Employee' && !empty($view_data['admin_session']['u_is_apl'])) {
                                 // Assistant Project Leader — same links as Employee + Mail Links
                                 $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
+                                $menu['myprojects'] = array('My Projects', 'home/myprojects', 'fa-sitemap');
                                 $menu['tasks'] = array('Tasks', 'home/tasks', 'fa-tasks');
                                 $menu['leave_request'] = array('Leave Request', 'home/leaves', 'fa-briefcase');
                                 $menu['timesheet'] = array('Timesheet', 'home/timesheet', 'fa-briefcase');
@@ -243,6 +244,7 @@ if (isset($view_data['plugins'])) {
                                         //$menu['projects'] = array('Projects', 'home/projects', 'fa-sitemap');
                                         $menu['messages'] = array('Mail Links', 'home/messages', 'fa-envelope');
                                         $menu['myteam']   = array('My Team', 'home/myteam', 'fa-users');
+                                        $menu['myprojects'] = array('My Projects', 'home/myprojects', 'fa-sitemap');
                                     }
 
                                     $menu['tasks'] = array('Tasks', 'home/tasks', 'fa-tasks');
