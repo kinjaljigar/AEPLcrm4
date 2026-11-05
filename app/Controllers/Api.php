@@ -678,31 +678,14 @@ class Api extends BaseController
             // Skip on Sat/Sun — will send Monday as belated
             if ($isWeekend) return;
 
-            // Cleanup birthday messages:
-            // Step 1: Delete all aa_message_users rows where mu_read=1 for birthday messages
-            $db->query(
-                "DELETE MU FROM aa_message_users MU
-                 INNER JOIN aa_message M ON M.me_id = MU.mu_me_id
-                 WHERE M.birthday_message = 'Yes' AND MU.mu_read = 1"
-            );
-            // Step 2: Delete birthday messages where all users have dismissed (no unread rows remain)
-            $db->query(
-                "DELETE FROM aa_message
+            // Fast early exit BEFORE any heavy queries — prevents deadlocks on concurrent polls
+            $alreadySent = $db->query(
+                "SELECT COUNT(*) as cnt FROM aa_message
                  WHERE birthday_message = 'Yes'
-                 AND me_id NOT IN (SELECT mu_me_id FROM aa_message_users WHERE mu_read = 0 OR mu_read IS NULL)"
-            );
-            // Step 3: Force-delete old birthday messages (> 1 month) — delete users first, then messages
-            $db->query(
-                "DELETE MU FROM aa_message_users MU
-                 INNER JOIN aa_message M ON M.me_id = MU.mu_me_id
-                 WHERE M.birthday_message = 'Yes'
-                 AND DATE(M.me_datetime) < DATE_SUB(NOW(), INTERVAL 4 MONTH)"
-            );
-            $db->query(
-                "DELETE FROM aa_message
-                 WHERE birthday_message = 'Yes'
-                 AND DATE(me_datetime) < DATE_SUB(NOW(), INTERVAL 4 MONTH)"
-            );
+                 AND DATE(me_datetime) = '{$today}'"
+            )->getRowArray()['cnt'] ?? 0;
+
+            if ($alreadySent > 0) return;
 
             // Build date map: 'm-d' => label
             $dateMap = [date('m-d') => 'today'];
@@ -716,15 +699,6 @@ class Api extends BaseController
             $inList    = "'" . implode("','", array_map([$db, 'escapeString'], array_keys($dateMap))) . "'";
             $dateWhere = "DATE_FORMAT(u_birthdate, '%m-%d') IN ({$inList})";
 
-            // Check if message already created for today
-            $alreadySent = $db->query(
-                "SELECT COUNT(*) as cnt FROM aa_message
-                 WHERE birthday_message = 'Yes'
-                 AND DATE(me_datetime) = '{$today}'"
-            )->getRowArray()['cnt'] ?? 0;
-
-            if ($alreadySent > 0) return; // Already sent today
-
             // Find all active users with birthdays
             $birthdayUsers = $db->query(
                 "SELECT u_id, u_name, DATE_FORMAT(u_birthdate, '%m-%d') as bmd
@@ -735,52 +709,94 @@ class Api extends BaseController
 
             if (empty($birthdayUsers)) return;
 
-            // Build message
-            $todayLines = [];
-            $belatedLines = [];
-            foreach ($birthdayUsers as $bu) {
-                [$mm, $dd] = explode('-', $bu['bmd']);
-                $dateStr = $dd . ' ' . ($months[$mm] ?? $mm);
-                $label = $dateMap[$bu['bmd']] ?? 'today';
-                if ($label === 'today') {
-                    $todayLines[] = $bu['u_name'] . ' (' . $dateStr . ')';
-                } else {
-                    $belatedLines[] = $bu['u_name'] . ' (' . $dateStr . ' - belated)';
+            // Acquire advisory lock (non-blocking) to serialize the check+insert among concurrent requests.
+            // Only one process proceeds; others skip safely — the winner will create the message.
+            $lockResult = $db->query("SELECT GET_LOCK('birthday_check_{$today}', 0) AS locked")->getRowArray();
+            if (empty($lockResult['locked'])) return;
+
+            try {
+                // Re-check inside lock to handle the race between fast-check and lock acquisition
+                $alreadySentInner = $db->query(
+                    "SELECT COUNT(*) as cnt FROM aa_message
+                     WHERE birthday_message = 'Yes'
+                     AND DATE(me_datetime) = '{$today}'"
+                )->getRowArray()['cnt'] ?? 0;
+
+                if ($alreadySentInner > 0) return;
+
+                // Cleanup birthday messages — runs at most once per day inside the lock,
+                // not on every concurrent poll (which was causing the deadlocks).
+                $db->query(
+                    "DELETE MU FROM aa_message_users MU
+                     INNER JOIN aa_message M ON M.me_id = MU.mu_me_id
+                     WHERE M.birthday_message = 'Yes' AND MU.mu_read = 1"
+                );
+                $db->query(
+                    "DELETE FROM aa_message
+                     WHERE birthday_message = 'Yes'
+                     AND me_id NOT IN (SELECT mu_me_id FROM aa_message_users WHERE mu_read = 0 OR mu_read IS NULL)"
+                );
+                $db->query(
+                    "DELETE MU FROM aa_message_users MU
+                     INNER JOIN aa_message M ON M.me_id = MU.mu_me_id
+                     WHERE M.birthday_message = 'Yes'
+                     AND DATE(M.me_datetime) < DATE_SUB(NOW(), INTERVAL 4 MONTH)"
+                );
+                $db->query(
+                    "DELETE FROM aa_message
+                     WHERE birthday_message = 'Yes'
+                     AND DATE(me_datetime) < DATE_SUB(NOW(), INTERVAL 4 MONTH)"
+                );
+
+                // Build message
+                $todayLines = [];
+                $belatedLines = [];
+                foreach ($birthdayUsers as $bu) {
+                    [$mm, $dd] = explode('-', $bu['bmd']);
+                    $dateStr = $dd . ' ' . ($months[$mm] ?? $mm);
+                    $label = $dateMap[$bu['bmd']] ?? 'today';
+                    if ($label === 'today') {
+                        $todayLines[] = $bu['u_name'] . ' (' . $dateStr . ')';
+                    } else {
+                        $belatedLines[] = $bu['u_name'] . ' (' . $dateStr . ' - belated)';
+                    }
                 }
-            }
 
-            $allEntries = array_merge($todayLines, $belatedLines);
-            $isBelatedOnly = empty($todayLines);
-            $messageText = ($isBelatedOnly ? 'Belated ' : '') . 'Happy Birthday: ' . implode(', ', $allEntries);
+                $allEntries = array_merge($todayLines, $belatedLines);
+                $isBelatedOnly = empty($todayLines);
+                $messageText = ($isBelatedOnly ? 'Belated ' : '') . 'Happy Birthday: ' . implode(', ', $allEntries);
 
-            // Insert message
-            $nextMeId = (int)($db->query("SELECT COALESCE(MAX(me_id), 0) + 1 AS next_id FROM aa_message")->getRowArray()['next_id'] ?? 1);
-            $db->table('aa_message')->insert([
-                'me_id'              => $nextMeId,
-                'me_datetime'        => date('Y-m-d H:i:s'),
-                'me_text'            => $messageText,
-                'me_p_id'            => 0,
-                'leave_message'      => 'No',
-                'conference_message' => 'No',
-                'task_message'       => 'No',
-                'schedule_message'   => 'No',
-                'birthday_message'   => 'Yes',
-            ]);
-
-            // Add to all non-Master-Admin users (include Super Admin, Bim Head, etc)
-            $allUsers = $db->query(
-                "SELECT u_id FROM aa_users WHERE u_status = 'Active' AND u_type NOT IN ('Master Admin')"
-            )->getResultArray();
-
-            $nextMuId = (int)($db->query("SELECT COALESCE(MAX(mu_id), 0) + 1 AS next_id FROM aa_message_users")->getRowArray()['next_id'] ?? 1);
-            foreach ($allUsers as $user) {
-                $db->table('aa_message_users')->insert([
-                    'mu_id'    => $nextMuId++,
-                    'mu_me_id' => $nextMeId,
-                    'mu_u_id'  => $user['u_id'],
-                    'mu_p_id'  => 0,
-                    'mu_read'  => 0,
+                // Insert message
+                $nextMeId = (int)($db->query("SELECT COALESCE(MAX(me_id), 0) + 1 AS next_id FROM aa_message")->getRowArray()['next_id'] ?? 1);
+                $db->table('aa_message')->insert([
+                    'me_id'              => $nextMeId,
+                    'me_datetime'        => date('Y-m-d H:i:s'),
+                    'me_text'            => $messageText,
+                    'me_p_id'            => 0,
+                    'leave_message'      => 'No',
+                    'conference_message' => 'No',
+                    'task_message'       => 'No',
+                    'schedule_message'   => 'No',
+                    'birthday_message'   => 'Yes',
                 ]);
+
+                // Add to all non-Master-Admin users (include Super Admin, Bim Head, etc)
+                $allUsers = $db->query(
+                    "SELECT u_id FROM aa_users WHERE u_status = 'Active' AND u_type NOT IN ('Master Admin')"
+                )->getResultArray();
+
+                $nextMuId = (int)($db->query("SELECT COALESCE(MAX(mu_id), 0) + 1 AS next_id FROM aa_message_users")->getRowArray()['next_id'] ?? 1);
+                foreach ($allUsers as $user) {
+                    $db->table('aa_message_users')->insert([
+                        'mu_id'    => $nextMuId++,
+                        'mu_me_id' => $nextMeId,
+                        'mu_u_id'  => $user['u_id'],
+                        'mu_p_id'  => 0,
+                        'mu_read'  => 0,
+                    ]);
+                }
+            } finally {
+                $db->query("SELECT RELEASE_LOCK('birthday_check_{$today}')");
             }
 
         } catch (\Exception $e) {

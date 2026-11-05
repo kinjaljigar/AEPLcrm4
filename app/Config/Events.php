@@ -23,6 +23,19 @@ use CodeIgniter\HotReloader\HotReloader;
  *      Events::on('create', [$myInstance, 'myMethod']);
  */
 
+// Auto-delete log files older than 30 days (runs ~1% of requests)
+Events::on('post_system', static function (): void {
+    if (rand(1, 100) === 1) {
+        $logPath = WRITEPATH . 'logs/';
+        $cutoff  = time() - (30 * 24 * 60 * 60);
+        foreach (glob($logPath . 'log-*.php') as $file) {
+            if (filemtime($file) < $cutoff) {
+                @unlink($file);
+            }
+        }
+    }
+});
+
 Events::on('pre_system', static function (): void {
     if (ENVIRONMENT !== 'testing') {
         if (ini_get('zlib.output_compression')) {
