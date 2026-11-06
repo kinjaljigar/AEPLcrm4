@@ -635,20 +635,8 @@ class Api extends BaseController
                 }
             }
 
-            // Garbage collection: keep only last 200 notification records per user
-            $uid_int = intval($u_id);
-            $db->query(
-                "DELETE FROM aa_desktop_notification_queue
-                 WHERE u_id = {$uid_int}
-                 AND id NOT IN (
-                     SELECT id FROM (
-                         SELECT id FROM aa_desktop_notification_queue
-                         WHERE u_id = {$uid_int}
-                         ORDER BY id DESC
-                         LIMIT 200
-                     ) AS keep_rows
-                 )"
-            );
+            // No GC needed here: regular notifications are deleted on delivery (above),
+            // birthday is_sent=1 records are cleaned up inside _checkBirthdayNotifications.
 
             echo json_encode($notifications);
         } catch (\Exception $e) {
@@ -817,21 +805,7 @@ class Api extends BaseController
             $today          = date('Y-m-d');
             $threeDaysLater = date('Y-m-d', strtotime('+3 days'));
 
-            // Cleanup: delete dismissed leave_reminder messages (mu_read=1)
-            $db->query(
-                "DELETE MU FROM aa_message_users MU
-                 INNER JOIN aa_message M ON M.me_id = MU.mu_me_id
-                 WHERE M.leave_reminder = 'Yes' AND MU.mu_u_id = {$u_id} AND MU.mu_read = 1"
-            );
-            // Cleanup: delete leave_reminder messages older than 7 days
-            $db->query(
-                "DELETE FROM aa_message
-                 WHERE leave_reminder = 'Yes'
-                 AND me_u_id = {$u_id}
-                 AND DATE(me_datetime) < DATE_SUB(NOW(), INTERVAL 7 DAY)"
-            );
-
-            // Already created today for this leader?
+            // Fast early exit — prevents cleanup DELETEs from running on every poll
             $alreadySent = $db->query(
                 "SELECT COUNT(*) as cnt FROM aa_message
                  WHERE leave_reminder = 'Yes'
@@ -854,6 +828,19 @@ class Api extends BaseController
             )->getResultArray();
 
             if (empty($upcomingLeaves)) return;
+
+            // Cleanup runs once per day (here, just before creating the message) — not on every poll
+            $db->query(
+                "DELETE MU FROM aa_message_users MU
+                 INNER JOIN aa_message M ON M.me_id = MU.mu_me_id
+                 WHERE M.leave_reminder = 'Yes' AND MU.mu_u_id = {$u_id} AND MU.mu_read = 1"
+            );
+            $db->query(
+                "DELETE FROM aa_message
+                 WHERE leave_reminder = 'Yes'
+                 AND me_u_id = {$u_id}
+                 AND DATE(me_datetime) < DATE_SUB(NOW(), INTERVAL 7 DAY)"
+            );
 
             // Build message
             $lines = [];
